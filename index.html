@@ -6,6 +6,8 @@
 <title>Fleet 6 Parts Order — Evolution Well Services</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.0.0/fuse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 <style>
 :root {
   --teal:     #1eb474;
@@ -344,6 +346,10 @@ input,select{outline:none;font-family:inherit;}
     <div class="tb-right">
       <div class="tb-user"><div class="un" id="hName"></div><div class="ur" id="hRole"></div></div>
       <span class="dpill" id="hBadge"></span>
+      <div title="Cloud sync status" style="display:flex;align-items:center;gap:5px;padding:0 4px;">
+        <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;transition:background .3s;"></span>
+        <span id="syncLbl" style="font-size:10px;color:#888;letter-spacing:.5px;font-weight:600;">Offline</span>
+      </div>
       <button class="exit-btn" onclick="logout()">Exit</button>
     </div>
   </div>
@@ -602,7 +608,149 @@ function groupKey(){ return 'f6_gn_'+(user?user.role:'def'); }
 // Each department gets its own favorites list
 function favsKey(){ return 'f6_fv_' + (user ? user.role : 'default'); }
 
+// ── FIREBASE CLOUD SYNC ──────────────────────────────────────
+var firebaseConfig = {
+  apiKey: "AIzaSyA6na2bzIxk1QFlmn2mOi-H3QoSI7sgRSM",
+  authDomain: "ews-fleet6.firebaseapp.com",
+  databaseURL: "https://ews-fleet6-default-rtdb.firebaseio.com",
+  projectId: "ews-fleet6",
+  storageBucket: "ews-fleet6.firebasestorage.app",
+  messagingSenderId: "577833479907",
+  appId: "1:577833479907:web:830c03ec5410116f675fd6"
+};
+var fbApp=null, fbDb=null, fbReady=false, fbInitDone=false;
+var roleListeners=[]; // unsubscribe functions for role-scoped listeners
+var _fbSaveTimer=null;
+var _suppressRender=false;
+
+function fbInit(){
+  if(fbInitDone) return;
+  if(typeof firebase==='undefined'){
+    console.warn('[Firebase] SDK not loaded - app running offline (localStorage only)');
+    return;
+  }
+  try{
+    fbApp = firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.database();
+    fbReady = true;
+    fbInitDone = true;
+
+    // Connection state -> sync indicator
+    fbDb.ref('.info/connected').on('value', function(snap){
+      var dot = document.getElementById('syncDot');
+      var lbl = document.getElementById('syncLbl');
+      if(dot){
+        dot.style.background = snap.val() ? '#1eb474' : '#888';
+      }
+      if(lbl){
+        lbl.textContent = snap.val() ? 'Synced' : 'Offline';
+        lbl.style.color = snap.val() ? '#1eb474' : '#888';
+      }
+    });
+
+    // Global listeners (apply to everyone, every role)
+    fbDb.ref('order').on('value', function(snap){
+      var v = snap.val() || {};
+      order = v;
+      try{ localStorage.setItem(SK.o, JSON.stringify(v)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('keep').on('value', function(snap){
+      var v = snap.val() || {};
+      keep = v;
+      try{ localStorage.setItem(SK.k, JSON.stringify(v)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('hist').on('value', function(snap){
+      var v = snap.val() || [];
+      hist = Array.isArray(v) ? v : Object.values(v);
+      try{ localStorage.setItem(SK.h, JSON.stringify(hist)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('elog').on('value', function(snap){
+      var v = snap.val() || [];
+      var arr = Array.isArray(v) ? v : Object.values(v);
+      try{ localStorage.setItem(EL_KEY, JSON.stringify(arr)); }catch(e){}
+      var modal = document.getElementById('mEventLog');
+      if(modal && modal.style.display==='flex' && typeof refreshEventLog==='function') refreshEventLog();
+    });
+    fbDb.ref('customParts').on('value', function(snap){
+      var v = snap.val();
+      if(v == null){
+        localStorage.removeItem(CUSTOM_PARTS_KEY);
+      } else {
+        var arr = Array.isArray(v) ? v : Object.values(v);
+        try{ localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(arr)); }catch(e){}
+      }
+      // Rebuild fuse index since parts list may have changed
+      if(typeof getActiveParts==='function' && typeof buildFuse==='function') {
+        try{ fuseIndex = buildFuse(getActiveParts()); }catch(e){}
+      }
+      _rerender();
+      if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
+    });
+
+    console.log('[Firebase] Connected to', firebaseConfig.databaseURL);
+  } catch(e){
+    console.error('[Firebase] Init failed:', e);
+  }
+}
+
+function fbAttachRoleListeners(){
+  if(!fbReady || !user) return;
+  // Detach old role listeners if user switched roles
+  roleListeners.forEach(function(unsub){ try{ unsub(); }catch(e){} });
+  roleListeners = [];
+  var role = user.role;
+  function attach(path, applyFn, lsKey){
+    var ref = fbDb.ref(path);
+    var cb = function(snap){
+      var v = snap.val() || {};
+      applyFn(v);
+      try{ localStorage.setItem(lsKey, JSON.stringify(v)); }catch(e){}
+      _rerender();
+    };
+    ref.on('value', cb);
+    roleListeners.push(function(){ ref.off('value', cb); });
+  }
+  attach('favs/'+role,   function(v){ favs = v; },      favsKey());
+  attach('nicks/'+role,  function(v){ favNicks = v; },  nickKey());
+  attach('colors/'+role, function(v){ favColors = v; }, colorKey());
+  attach('groups/'+role, function(v){ favGroups = v; }, groupKey());
+}
+
+function _rerender(){
+  if(!user || _suppressRender) return;
+  if(typeof badges==='function') badges();
+  // Don't re-render if user is mid-typing in a label/group input — would steal focus
+  var ae = document.activeElement;
+  if(ae && (ae.classList.contains('fav-desc-input') || ae.classList.contains('fav-group-name'))) return;
+  var activeTab = document.querySelector('.tab-btn.active');
+  if(!activeTab) return;
+  var t = activeTab.dataset.tab;
+  if(t==='order'    && typeof renderOrder==='function')   renderOrder();
+  if(t==='browse'   && typeof renderBrowse==='function')  renderBrowse();
+  if(t==='favorites'&& typeof renderFavs==='function')    renderFavs();
+  if(t==='history'  && typeof renderHistory==='function') renderHistory();
+  if(t==='admin'    && typeof renderAdmin==='function')   renderAdmin();
+}
+
+function _fbFlush(){
+  if(!fbReady || !user) return;
+  try{
+    fbDb.ref('order').set(order || {});
+    fbDb.ref('keep').set(keep || {});
+    fbDb.ref('hist').set(hist || []);
+    var role = user.role;
+    fbDb.ref('favs/'+role).set(favs || {});
+    fbDb.ref('nicks/'+role).set(favNicks || {});
+    fbDb.ref('colors/'+role).set(favColors || {});
+    fbDb.ref('groups/'+role).set(favGroups || {});
+  } catch(e){ console.error('[Firebase] flush failed:', e); }
+}
+
 function save(){
+  // localStorage write (instant, also serves as offline cache)
   try{
     localStorage.setItem(SK.o,JSON.stringify(order));
     localStorage.setItem(SK.k,JSON.stringify(keep));
@@ -612,6 +760,10 @@ function save(){
     localStorage.setItem(groupKey(),JSON.stringify(favGroups));
     localStorage.setItem(SK.h,JSON.stringify(hist));
   }catch(e){}
+  // Debounced cloud write (consolidates rapid keystrokes)
+  if(!fbReady) return;
+  if(_fbSaveTimer) clearTimeout(_fbSaveTimer);
+  _fbSaveTimer = setTimeout(_fbFlush, 300);
 }
 function load(){
   try{
@@ -676,6 +828,8 @@ function doLogin(){
 
   user={name,role:selR};
   load();
+  fbInit();                  // initialize Firebase (no-op after first time)
+  fbAttachRoleListeners();   // listen for changes to this role's favorites/nicks/colors/groups
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('hName').textContent=name;
@@ -705,6 +859,11 @@ function doLogin(){
 
 function logout(){
   save();
+  // Detach role-scoped Firebase listeners so next login can re-attach for new role
+  if(typeof roleListeners!=='undefined'){
+    roleListeners.forEach(function(unsub){ try{ unsub(); }catch(e){} });
+    roleListeners = [];
+  }
   user=null;selR=null;
   document.querySelectorAll('.role-btn').forEach(b=>b.classList.remove('sel','sel-adm'));
   document.getElementById('userName').value='';
@@ -1061,6 +1220,9 @@ function writeLog(action, partName, qty, who, role) {
   arr.push({ a:action, p:partName, q:qty||'', w:who, r:role, t:new Date().toLocaleString() });
   if(arr.length > 500) arr = arr.slice(-500);
   localStorage.setItem(EL_KEY, JSON.stringify(arr));
+  if(typeof fbReady!=='undefined' && fbReady){
+    try{ fbDb.ref('elog').set(arr); }catch(e){}
+  }
   console.log('[EWS Log] Wrote:', action, partName, '| Total entries:', arr.length);
 }
 
@@ -1127,6 +1289,7 @@ function refreshEventLog() {
 function clearEventLog() {
   if(!confirm('Clear the entire event log? This cannot be undone.')) return;
   localStorage.removeItem(EL_KEY);
+  if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('elog').remove(); }catch(e){} }
   refreshEventLog();
   toast('Event log cleared');
 }
@@ -1136,6 +1299,15 @@ function clearEventLog() {
 <script>
 // ── CUSTOM PARTS MANAGEMENT ──────────────────────────────────
 var CUSTOM_PARTS_KEY = 'f6_custom_parts';
+function _setCustomParts(parts){
+  if(parts == null){
+    localStorage.removeItem(CUSTOM_PARTS_KEY);
+    if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customParts').remove(); }catch(e){} }
+  } else {
+    localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(parts));
+    if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customParts').set(parts); }catch(e){} }
+  }
+}
 
 // Get the active parts list (custom if set, else default PARTS)
 function getActiveParts() {
@@ -1238,7 +1410,7 @@ function handleXlsxUpload(input) {
         return;
       }
 
-      localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(parts));
+      _setCustomParts(parts);
       fuseIndex = null; // Reset fuse index so it rebuilds with new parts
       alert('✓ Successfully loaded ' + parts.length.toLocaleString() + ' parts from ' + file.name);
       updateCustomPartsStatus();
@@ -1275,7 +1447,7 @@ function manualAddPart() {
   // Sort by oracle number
   parts.sort(function(a,b){return a[0].localeCompare(b[0]);});
 
-  localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(parts));
+  _setCustomParts(parts);
   fuseIndex = null;
 
   // Clear form
@@ -1328,7 +1500,7 @@ function deletePart(oracle) {
   var partName = part ? part[2].slice(0,80) : oracle;
   if(!confirm('Delete this part from the master list?\n\n' + partName + '\n\nThis cannot be undone unless you reset to default.')) return;
   var newParts = parts.filter(function(p){return p[0]!==oracle;});
-  localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(newParts));
+  _setCustomParts(newParts);
   fuseIndex = null;
   updateCustomPartsStatus();
   renderBrowse();
@@ -1339,7 +1511,7 @@ function deletePart(oracle) {
 // ── RESET TO DEFAULT ─────────────────────────────────────────
 function resetToDefaultParts() {
   if(!confirm('Reset to the original baked-in Oracle extract? All uploads and manual changes will be lost.')) return;
-  localStorage.removeItem(CUSTOM_PARTS_KEY);
+  _setCustomParts(null);
   fuseIndex = null;
   updateCustomPartsStatus();
   renderBrowse();
