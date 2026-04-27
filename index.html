@@ -108,6 +108,25 @@ input,select{outline:none;font-family:inherit;}
 .sbox input{width:100%;padding:10px 14px 10px 38px;font-size:13px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:2px;transition:all .2s;}
 .sbox input:focus{border-color:var(--teal);}
 .sbox input::placeholder{color:var(--muted2);}
+.recent-dd{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--card);border:1px solid var(--border);border-radius:2px;max-height:280px;overflow-y:auto;z-index:50;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.4);}
+.recent-hd{font-size:10px;color:var(--muted);padding:8px 12px 4px;letter-spacing:0.5px;text-transform:uppercase;font-weight:700;}
+.recent-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-top:1px solid var(--border);}
+.recent-item:hover{background:var(--card2);}
+.recent-icon{font-size:11px;opacity:0.55;}
+.recent-text{flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.recent-x{background:transparent;border:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:2px;}
+.recent-x:hover{color:var(--text);background:rgba(255,255,255,0.06);}
+.help-btn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;transition:all 0.12s ease;}
+.help-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-dim);}
+.help-modal-card{max-width:640px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-top:3px solid var(--teal);border-radius:2px;padding:24px 26px;}
+.help-modal-card h4{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.help-modal-card h4:first-child{margin-top:0;}
+.help-modal-card ul{list-style:none;padding:0;margin:0;}
+.help-modal-card li{font-size:13px;line-height:1.55;color:var(--text);padding:8px 0 8px 18px;position:relative;border-bottom:1px solid rgba(255,255,255,0.04);}
+.help-modal-card li:last-child{border-bottom:none;}
+.help-modal-card li:before{content:"›";position:absolute;left:0;top:8px;color:var(--teal);font-weight:700;}
+.help-modal-card li strong{color:var(--teal-l);font-weight:700;}
+.help-modal-card li code{background:rgba(255,255,255,0.06);color:var(--teal-l);padding:1px 6px;border-radius:2px;font-size:12px;font-family:'SFMono-Regular',Consolas,monospace;}
 .sico{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;pointer-events:none;}
 .fsel{padding:10px 12px;font-size:11px;font-weight:600;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:2px;transition:border-color .2s;}
 .fsel:focus{border-color:var(--teal);}
@@ -143,6 +162,7 @@ input,select{outline:none;font-family:inherit;}
 .pinfo{flex:1;min-width:0;}
 .pdesc{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px;}
 .pdesc mark{background:rgba(30,180,116,0.25);color:var(--teal-l);border-radius:2px;padding:0 2px;}
+.pmeta mark{background:rgba(30,180,116,0.30);color:var(--teal-l);border-radius:2px;padding:0 2px;font-weight:700;}
 .pmeta{font-size:11px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;}
 .pact{display:flex;align-items:center;gap:7px;flex-shrink:0;}
 .qwrap{display:flex;align-items:center;gap:4px;}
@@ -391,6 +411,7 @@ input,select{outline:none;font-family:inherit;}
           <select class="fsel" id="oDeptF" onchange="renderOrder()">
             <option value="">All Classifications</option><option value="0">🔧 Mechanical</option><option value="1">⚡ Electrical</option><option value="2">💻 Datavan</option><option value="3">🔨 Tools</option><option value="4">🔩 Hardware</option><option value="5">📦 Miscellaneous</option>
           </select>
+          <button class="help-btn" onclick="openHelp('order')" title="What is this tab?" aria-label="Help">?</button>
 
         </div>
       </div>
@@ -402,11 +423,13 @@ input,select{outline:none;font-family:inherit;}
       <div class="search-row">
         <div class="sbox">
           <span class="sico">🔍</span>
-          <input type="text" id="bQ" placeholder="Fuzzy search — try partial words, abbreviations, typos..." oninput="dbBrowse()" />
+          <input type="text" id="bQ" placeholder="Search — try partial words, abbreviations, typos..." oninput="dbBrowse()" onfocus="showRecentDropdown('bQ')" onblur="hideRecentDropdown('bQ');saveRecentSearch(this.value)" />
+          <div id="bQ_recent" class="recent-dd"></div>
         </div>
         <select class="fsel" id="bDept" onchange="rstBrowse()">
           <option value="">All Classifications</option><option value="0">🔧 Mechanical</option><option value="1">⚡ Electrical</option><option value="2">💻 Datavan</option><option value="3">🔨 Tools</option><option value="4">🔩 Hardware</option><option value="5">📦 Miscellaneous</option>
         </select>
+        <button class="help-btn" onclick="openHelp('browse')" title="How does search work?" aria-label="Help">?</button>
       </div>
       <div class="sec-hd"><div id="bCount" style="font-size:11px;color:var(--muted);letter-spacing:.5px;"></div></div>
       <div id="bList" class="parts-list"></div>
@@ -418,11 +441,13 @@ input,select{outline:none;font-family:inherit;}
       <div class="search-row">
         <div class="sbox">
           <span class="sico">🔍</span>
-          <input type="text" id="fQ" placeholder="Fuzzy search favorites..." oninput="renderFavs()" />
+          <input type="text" id="fQ" placeholder="Search favorites..." oninput="renderFavs()" onfocus="showRecentDropdown('fQ')" onblur="hideRecentDropdown('fQ');saveRecentSearch(this.value)" />
+          <div id="fQ_recent" class="recent-dd"></div>
         </div>
         <select class="fsel" id="fDept" onchange="renderFavs()">
           <option value="">All Classifications</option><option value="0">🔧 Mechanical</option><option value="1">⚡ Electrical</option><option value="2">💻 Datavan</option><option value="3">🔨 Tools</option><option value="4">🔩 Hardware</option><option value="5">📦 Miscellaneous</option>
         </select>
+        <button class="help-btn" onclick="openHelp('favorites')" title="What can favorites do?" aria-label="Help">?</button>
       </div>
       <div id="fList" class="parts-list"></div>
     </div>
@@ -431,6 +456,9 @@ input,select{outline:none;font-family:inherit;}
     <div class="tab-content" id="tab-history">
       <div class="sec-hd">
         <div class="sec-t">Reset History — Fleet 6</div>
+        <div class="sec-a">
+          <button class="help-btn" onclick="openHelp('history')" title="How does history work?" aria-label="Help">?</button>
+        </div>
       </div>
       <div id="hList"></div>
     </div>
@@ -444,6 +472,7 @@ input,select{outline:none;font-family:inherit;}
           <div class="sec-t">Items to Carry Over</div>
           <button class="btn-danger" onclick="openReset()">🗑️ Reset Weekly Order</button>
           <button class="btn-primary" onclick="openEventLog()" style="background:#2f8cca;border:none;">📝 View Event Log</button>
+          <button class="help-btn" onclick="openHelp('admin')" title="What does Admin do?" aria-label="Help">?</button>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Check items to preserve after the weekly reset:</div>
         <div id="kList"></div>
@@ -610,6 +639,200 @@ function buildFuse(partsList) {
     ignoreLocation: true, // search entire string, not just start
     useExtendedSearch: false
   });
+}
+
+// ── ABBREVIATION / SYNONYM EXPANSION ────────────────────────
+// Curated industrial-parts abbreviation map. Each group: every term in the
+// group is treated as equivalent for both matching and highlighting. Kept
+// to 3+ chars to avoid noise from short substrings (no "ss", "lh", "ft").
+var SYNONYM_GROUPS = [
+  // Formatting variant — bridges hyphenation
+  ['oring', 'o-ring'],
+  // Pure abbreviations — distinctive, low false-positive risk
+  ['blt', 'bolt'],
+  ['wshr', 'washer'],
+  ['scr', 'screw'],
+  ['assy', 'assembly'],
+  ['hyd', 'hydraulic'],
+  ['pneu', 'pneumatic'],
+  ['elec', 'electric', 'electrical'],
+  ['mech', 'mechanical'],
+  ['temp', 'temperature'],
+  ['press', 'pressure'],
+  ['dia', 'diameter'],
+  ['hex', 'hexagon'],
+  ['ckt', 'circuit'],
+  ['brkr', 'breaker'],
+  ['mtr', 'motor'],
+  ['gskt', 'gasket'],
+  ['vlv', 'valve'],
+  ['cbl', 'cable'],
+  ['btry', 'battery'],
+  ['conn', 'connector'],
+  ['recpt', 'rcpt', 'receptacle'],
+  ['xfmr', 'transformer'],
+  ['gnd', 'ground'],
+  ['volt', 'voltage'],
+  ['std', 'standard']
+];
+
+// Build flat lookup: term → array of equivalent siblings
+var SYNONYMS = (function(){
+  var map = Object.create(null);
+  SYNONYM_GROUPS.forEach(function(g){
+    g.forEach(function(term){
+      var k = term.toLowerCase();
+      if(!map[k]) map[k] = [];
+      g.forEach(function(s){
+        if(s.toLowerCase() !== k) map[k].push(s.toLowerCase());
+      });
+    });
+  });
+  return map;
+})();
+
+// Expand a token to all its known aliases (original, hyphen-stripped,
+// synonyms, synonym hyphen-stripped). Returns deduplicated array.
+function expandToken(t){
+  var seen=Object.create(null), out=[];
+  function add(s){if(s && !seen[s]){seen[s]=1;out.push(s);}}
+  add(t);
+  add(t.replace(/-/g,''));
+  var syn=SYNONYMS[t.replace(/-/g,'')];
+  if(syn) syn.forEach(function(s){add(s);add(s.replace(/-/g,''));});
+  return out;
+}
+
+// Cached hyphen-stripped lowercase forms of part fields (oracle/sage/desc).
+// Invalidated on parts-array reference change (e.g. custom parts loaded).
+var _normCache=null, _normCacheSrc=null;
+function _ensureNormCache(parts){
+  if(_normCacheSrc===parts) return _normCache;
+  _normCacheSrc=parts;
+  _normCache=parts.map(function(p){
+    return {
+      o: String(p[0]||'').toLowerCase().replace(/-/g,''),
+      s: String(p[1]||'').toLowerCase().replace(/-/g,''),
+      d: String(p[2]||'').toLowerCase().replace(/-/g,'')
+    };
+  });
+  return _normCache;
+}
+
+// Tiered single-token search with synonym/abbreviation expansion.
+// Each token expands to its alias set; best tier across all aliases wins.
+// Returns {partIdx: tier} where lower tier = better match.
+function _tokenMatches(token, parts){
+  var aliases=expandToken(token.toLowerCase()).map(function(a){return a.replace(/-/g,'');});
+  var seen=Object.create(null);
+  aliases=aliases.filter(function(a){if(!a||seen[a])return false;seen[a]=1;return true;});
+  var cache=_ensureNormCache(parts);
+  var result=Object.create(null);
+  for(var i=0;i<parts.length;i++){
+    var c=cache[i];
+    var bestTier=null;
+    for(var a=0;a<aliases.length;a++){
+      var al=aliases[a],tier;
+      if(c.o===al||c.s===al)tier=0;
+      else if(c.o.indexOf(al)===0||c.s.indexOf(al)===0)tier=1;
+      else if(c.o.indexOf(al)>=0||c.s.indexOf(al)>=0)tier=2;
+      else if(c.d.indexOf(al)>=0)tier=3;
+      else continue;
+      if(bestTier===null||tier<bestTier)bestTier=tier;
+    }
+    if(bestTier!==null)result[i]=bestTier;
+  }
+  return result;
+}
+
+// Smart search: handles single-token (tiered ID-first) and multi-token (AND
+// across all tokens, ranked by aggregate tier). Falls back to Fuse fuzzy when
+// substring matching returns nothing — handles typos.
+function smartSearch(q, parts, fuse){
+  var trimmed=(q||'').trim();
+  if(!trimmed||!fuse)return [];
+  var tokens=trimmed.split(/\s+/).filter(Boolean);
+  // Per-token substring matches
+  var sets=tokens.map(function(t){return _tokenMatches(t,parts);});
+  // Intersection: indices present in ALL token match sets
+  var ranked=[];
+  var first=sets[0];
+  for(var k in first){
+    var inAll=true,totalTier=first[k];
+    for(var s=1;s<sets.length;s++){
+      if(sets[s][k]===undefined){inAll=false;break;}
+      totalTier+=sets[s][k];
+    }
+    if(inAll)ranked.push({i:+k,t:totalTier});
+  }
+  ranked.sort(function(a,b){return a.t-b.t;});
+  // Substring AND found nothing — fall back to fuzzy on the whole query
+  if(!ranked.length){
+    var fuzzy=fuse.search(trimmed,{limit:500});
+    return fuzzy.map(function(r){return{item:{i:r.item.i}};});
+  }
+  return ranked.map(function(r){return{item:{i:r.i}};});
+}
+
+// ── RECENT SEARCHES ─────────────────────────────────────────
+// Per-role rolling list of last 8 search queries. Stored in localStorage.
+var RECENTS_MAX = 8;
+function _recentsKey(){return 'f6_recent_'+(user&&user.role?user.role:'guest');}
+function getRecents(){
+  try{var v=JSON.parse(localStorage.getItem(_recentsKey())||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}
+}
+function saveRecentSearch(q){
+  q=(q||'').trim();
+  if(q.length<2)return;
+  var list=getRecents().filter(function(x){return x.toLowerCase()!==q.toLowerCase();});
+  list.unshift(q);
+  if(list.length>RECENTS_MAX)list=list.slice(0,RECENTS_MAX);
+  try{localStorage.setItem(_recentsKey(),JSON.stringify(list));}catch(e){}
+}
+function removeRecentSearch(q){
+  var list=getRecents().filter(function(x){return x!==q;});
+  try{localStorage.setItem(_recentsKey(),JSON.stringify(list));}catch(e){}
+  ['bQ','fQ'].forEach(updateRecentDropdown);
+}
+function updateRecentDropdown(inputId){
+  var dd=document.getElementById(inputId+'_recent');
+  if(!dd)return;
+  var input=document.getElementById(inputId);
+  if(!input||input.value.trim()){dd.style.display='none';return;}
+  var list=getRecents();
+  if(!list.length){dd.style.display='none';return;}
+  dd.innerHTML='<div class="recent-hd">Recent searches</div>'+list.map(function(q){
+    var safe=e(q),safeAttr=safe.replace(/"/g,'&quot;');
+    return '<div class="recent-item" data-input="'+inputId+'" data-q="'+safeAttr+'">'+
+      '<span class="recent-icon">🕐</span>'+
+      '<span class="recent-text">'+safe+'</span>'+
+      '<button class="recent-x" title="Remove" data-q="'+safeAttr+'">×</button>'+
+    '</div>';
+  }).join('');
+  dd.style.display='';
+  // Wire up click handlers
+  dd.querySelectorAll('.recent-item').forEach(function(el){
+    el.addEventListener('mousedown',function(ev){
+      // Stop blur from firing first; mousedown precedes blur
+      if(ev.target.classList.contains('recent-x')){
+        ev.preventDefault();ev.stopPropagation();
+        removeRecentSearch(ev.target.getAttribute('data-q'));
+        return;
+      }
+      ev.preventDefault();
+      var iid=el.getAttribute('data-input'),qv=el.getAttribute('data-q');
+      var ip=document.getElementById(iid);
+      if(ip){ip.value=qv;ip.dispatchEvent(new Event('input'));ip.focus();dd.style.display='none';}
+    });
+  });
+}
+function showRecentDropdown(inputId){updateRecentDropdown(inputId);}
+function hideRecentDropdown(inputId){
+  // Delay so a click on an item registers before hide
+  setTimeout(function(){
+    var dd=document.getElementById(inputId+'_recent');
+    if(dd)dd.style.display='none';
+  },180);
 }
 
 // ── STATE ───────────────────────────────────────────────────
@@ -885,11 +1108,7 @@ function doLogin(){
     document.getElementById('adminTab').style.display='flex';
   }
 
-  // Pre-filter by dept (browse only — favorites filter resets to "All" on each tab open)
-  const dm={Mechanical:'0',Electrical:'1',Datavan:'2'};
-  if(dm[selR]){
-    document.getElementById('bDept').value=dm[selR];
-  }
+  // Filters default to "All" on every tab open — no login pre-fill needed
 
   // Build fuse index on first login
   if(!fuseIndex) fuseIndex=buildFuse(PARTS);
@@ -921,7 +1140,7 @@ function logout(){
 function switchTab(t){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.toggle('active',c.id==='tab-'+t));
-  if(t==='browse')renderBrowse();
+  if(t==='browse'){document.getElementById('bDept').value='';rstBrowse();}
   if(t==='favorites'){document.getElementById('fDept').value='';renderFavs();}
   if(t==='history')renderHistory();
   if(t==='admin')renderAdmin();
@@ -1029,7 +1248,7 @@ function renderBrowse(){
   } else {
     // Fuzzy search
     if(!fuseIndex)fuseIndex=buildFuse(PARTS);
-    const raw=fuseIndex.search(q,{limit:500});
+    const raw=smartSearch(q,PARTS,fuseIndex);
     bFil=raw
       .map(r=>{return{part:PARTS[r.item.i],hl:null,score:r.score};})
       .filter(r=>dept===''||r.part[4]==dept);
@@ -1048,28 +1267,36 @@ function renderBrowse(){
 // Simple highlight: bold matching chars
 function highlight(text, query){
   if(!query)return e(text);
-  // Escape special regex chars in query words, then highlight matches
-  const words=query.trim().split(/\s+/).filter(Boolean);
-  let result=e(text);
+  var words=query.trim().split(/\s+/).filter(Boolean);
+  if(!words.length)return e(text);
+  var seen=Object.create(null), terms=[];
   words.forEach(function(w){
-    var safe=w.replace(/[-[\]{}()*+?.,\\^$|#\s]/g,'\\$&');
-    var re=new RegExp('('+safe+')','gi');
-    result=result.replace(re,'<mark>$1</mark>');
+    expandToken(w.toLowerCase()).forEach(function(a){
+      // Skip <2 char aliases — too noisy in highlighting
+      if(a.length>=2 && !seen[a]){seen[a]=1;terms.push(a);}
+    });
   });
-  return result;
+  if(!terms.length)return e(text);
+  // Sort longest first so alternation prefers longer matches when overlapping
+  terms.sort(function(a,b){return b.length-a.length;});
+  var safe=terms.map(function(t){return t.replace(/[-[\]{}()*+?.,\\^$|#\s]/g,'\\$&');});
+  var re=new RegExp('('+safe.join('|')+')','gi');
+  return e(text).replace(re,'<mark>$1</mark>');
 }
 
 function pCard(p,q=''){
   const o=p[0],io=!!order[o],iv=!!favs[o];
   const descHtml=highlight(p[2].length>130?p[2].slice(0,130)+'…':p[2], q);
+  const oracleHtml=highlight(String(p[0]),q);
+  const sageHtml=highlight(String(p[1]),q);
   const deptOpts=`<option value="0"${p[4]==0?' selected':''}>🔧 Mechanical</option><option value="1"${p[4]==1?' selected':''}>⚡ Electrical</option><option value="2"${p[4]==2?' selected':''}>💻 Datavan</option><option value="3"${p[4]==3?' selected':''}>🔨 Tools</option><option value="4"${p[4]==4?' selected':''}>🔩 Hardware</option><option value="5"${p[4]==5?' selected':''}>📦 Miscellaneous</option>`;
   return`<div class="part-card d${p[4]}">
     <div class="pinfo">
       <div class="pdesc" title="${e(p[2])}">${descHtml}</div>
       <div class="pmeta">
         <select class="dept-select" data-oracle="${o}" onchange="onDeptChange(this)" title="Change department classification (applies for everyone)">${deptOpts}</select>
-        <span>Oracle: ${p[0]}</span>
-        <span>SAGE: ${p[1]}</span>
+        <span>Oracle: ${oracleHtml}</span>
+        <span>SAGE: ${sageHtml}</span>
         <span>UOM: ${p[3]}</span>
       </div>
     </div>
@@ -1109,7 +1336,7 @@ function renderFavs(){
     fp=activeParts.filter(function(p){return favs[p[0]]&&(dept===''||p[4]==dept);});
   } else {
     if(!fuseIndex)fuseIndex=buildFuse(activeParts);
-    var raw=fuseIndex.search(q,{limit:300});
+    var raw=smartSearch(q,activeParts,fuseIndex);
     fp=raw.map(function(r){return activeParts[r.item.i];}).filter(function(p){return favs[p[0]]&&(dept===''||p[4]==dept);});
   }
   if(!fp.length){
@@ -1351,6 +1578,163 @@ function clearEventLog() {
   refreshEventLog();
   toast('Event log cleared');
 }
+</script>
+
+
+<!-- HELP MODAL ─────────────────────────────────────────────── -->
+<div id="mHelp" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9000;flex-direction:column;">
+  <div style="background:#141414;border-bottom:1px solid #363636;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <div>
+      <div id="helpTitle" style="font-size:15px;font-weight:800;color:#f0f0f0;letter-spacing:.5px;">Help</div>
+      <div style="font-size:11px;color:#888;margin-top:3px;">Quick reference for this tab</div>
+    </div>
+    <button onclick="closeHelp()" style="background:rgba(255,255,255,0.07);color:#999;border:1px solid #363636;border-radius:2px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;">✕ Close</button>
+  </div>
+  <div id="helpBody" style="flex:1;overflow-y:auto;padding:24px 20px;"></div>
+</div>
+
+<script>
+// ── HELP MODAL ──────────────────────────────────────────────
+// Per-tab contextual help. Each entry: { title, sections: [{ heading, items: [string|html...] }, ...] }
+var HELP_CONTENT = {
+  order: {
+    title: "📋 My Order — Help",
+    sections: [
+      { heading: "What this tab is",
+        items: [
+          "This is the <strong>shared weekly order</strong> for Fleet 6 — everyone on every dept profile sees and edits the same list.",
+          "The order resets weekly from the Admin tab. Items marked <strong>Keep</strong> survive the reset.",
+        ]
+      },
+      { heading: "Reading the stats boxes",
+        items: [
+          "<strong>Total Items</strong> counts everything in the order.",
+          "<strong>Mechanical / Electrical / Datavan</strong> count items by which dept profile <em>added</em> them — not by item type. So a hardware item added by a Mechanical user shows in the Mechanical box.",
+        ]
+      },
+      { heading: "Adjusting items",
+        items: [
+          "Adjust quantities with <code>+</code> / <code>−</code> or type into the number field directly.",
+          "Setting qty to <code>0</code> removes the item from the order.",
+          "The <strong>Classifications</strong> filter shows only one item type at a time (Tools, Hardware, etc.). It resets to \"All\" every time you open the tab.",
+        ]
+      }
+    ]
+  },
+
+  browse: {
+    title: "🔍 Master List — Help",
+    sections: [
+      { heading: "How search works",
+        items: [
+          "Search Oracle #, SAGE #, or description in one box. <strong>Exact ID matches always come first.</strong>",
+          "Multi-word searches require <strong>all words</strong> to match. <code>valve seat 4.5</code> finds parts that contain all three.",
+          "Abbreviations work: <code>blt</code> finds BOLT, <code>wshr</code> finds WASHER, <code>oring</code> finds O-RING. About 25 industrial shorthand terms are recognized.",
+          "If a search returns nothing, the system falls back to fuzzy matching to catch typos.",
+        ]
+      },
+      { heading: "Recent searches",
+        items: [
+          "Click the empty search box to see your last 8 searches (per profile).",
+          "Click any entry to re-run it. Hit the <code>×</code> to remove a single entry.",
+        ]
+      },
+      { heading: "Working with results",
+        items: [
+          "Tap <strong>☆</strong> to favorite a part, <strong>+ Add</strong> to put it in the order.",
+          "The classification dropdown on each card lets you fix the item type. <strong>That change applies for everyone</strong> — use it carefully.",
+          "Filter resets to \"All Classifications\" on every tab open.",
+        ]
+      }
+    ]
+  },
+
+  favorites: {
+    title: "⭐ Favorites — Help",
+    sections: [
+      { heading: "Per-profile favorites",
+        items: [
+          "Each dept profile has its <strong>own favorites list</strong> — Mechanical favorites are separate from Electrical and Datavan.",
+        ]
+      },
+      { heading: "Organizing",
+        items: [
+          "<strong>Color-tag</strong> favorites (8 colors) to organize them into visual groups.",
+          "<strong>Name your color groups</strong> (e.g. \"Hot Items\", \"Need Soon\") — the name shows on the group header.",
+          "<strong>Override a part description</strong> with a custom nickname. Only your dept sees it; the original description stays for everyone else.",
+        ]
+      },
+      { heading: "Search",
+        items: [
+          "Search uses the same engine as Master List — abbreviations, multi-word, and recent searches all work here too.",
+        ]
+      }
+    ]
+  },
+
+  history: {
+    title: "📜 Reset History — Help",
+    sections: [
+      { heading: "What you're looking at",
+        items: [
+          "Each entry is a <strong>snapshot of the weekly order</strong>, taken right before an Admin reset.",
+          "Most recent reset at the top.",
+        ]
+      },
+      { heading: "Expanding entries",
+        items: [
+          "Click any row to expand and see every item — full descriptions, qty/UOM, Oracle and SAGE numbers.",
+          "Click again to collapse. Each row toggles independently — you can have multiple expanded at once.",
+        ]
+      }
+    ]
+  },
+
+  admin: {
+    title: "🔐 Admin — Help",
+    sections: [
+      { heading: "Carrying items into next week",
+        items: [
+          "Check <strong>Keep</strong> on items that should survive the next reset (e.g. recurring weekly needs).",
+          "<strong>🗑️ Reset Weekly Order</strong> archives the current order into History and clears the slate. Items marked Keep stay.",
+          "Resets <strong>can't be undone</strong> — but the snapshot is always preserved in History.",
+        ]
+      },
+      { heading: "Event Log",
+        items: [
+          "<strong>📝 View Event Log</strong> shows every parts add and remove with timestamps, the user who did it, and their dept profile. Use it to investigate \"who changed what and when.\"",
+          "<strong>Clear Log</strong> wipes the entire log. Like resets, this can't be undone.",
+        ]
+      }
+    ]
+  }
+};
+
+function openHelp(tab){
+  var data = HELP_CONTENT[tab];
+  if(!data) return;
+  var modal = document.getElementById('mHelp');
+  document.getElementById('helpTitle').textContent = data.title;
+  var html = '<div class="help-modal-card">';
+  data.sections.forEach(function(sec){
+    html += '<h4>' + sec.heading + '</h4><ul>';
+    sec.items.forEach(function(item){ html += '<li>' + item + '</li>'; });
+    html += '</ul>';
+  });
+  html += '</div>';
+  document.getElementById('helpBody').innerHTML = html;
+  modal.style.display = 'flex';
+}
+function closeHelp(){
+  document.getElementById('mHelp').style.display = 'none';
+}
+// Esc closes the modal
+document.addEventListener('keydown', function(ev){
+  if(ev.key === 'Escape'){
+    var m = document.getElementById('mHelp');
+    if(m && m.style.display === 'flex') closeHelp();
+  }
+});
 </script>
 
 
@@ -1644,12 +2028,12 @@ function _origRenderBrowse_patched() {
     bFil=activeParts.filter(function(p){return dept===''||p[4]==dept;}).map(function(p){return{part:p};});
   } else {
     if(!fuseIndex) fuseIndex=buildFuse(activeParts);
-    var raw=fuseIndex.search(q,{limit:500});
+    var raw=smartSearch(q,activeParts,fuseIndex);
     bFil=raw.map(function(r){return{part:activeParts[r.item.i]};}).filter(function(r){return dept===''||r.part[4]==dept;});
   }
   var tot=bFil.length,s=bPg*PG,en=Math.min(s+PG,tot);
   document.getElementById('bCount').textContent='Showing '+(s+1).toLocaleString()+' – '+en.toLocaleString()+' of '+tot.toLocaleString()+' parts';
-  document.getElementById('bList').innerHTML=bFil.slice(s,en).map(function(r){return pCard(r.part);}).join('');
+  document.getElementById('bList').innerHTML=bFil.slice(s,en).map(function(r){return pCard(r.part,q);}).join('');
   renderPag(Math.ceil(tot/PG));
 }
 
