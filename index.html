@@ -341,6 +341,77 @@ input,select{outline:none;font-family:inherit;}
   .tb-logo{height:24px;}
   .role-grid{grid-template-columns:repeat(2,1fr);}
 }
+
+/* ── MOBILE REFINEMENTS — bigger taps, readable text, stacked filters ── */
+@media(max-width:620px){
+  /* let descriptions wrap instead of truncating with ellipsis */
+  .pdesc,.odesc,.kdesc,.log-detail{white-space:normal;text-overflow:clip;line-height:1.4;}
+  .pmeta{gap:8px;}
+
+  /* bigger tap targets — qty controls, star, add, remove, paginate */
+  .qb{width:36px;height:36px;font-size:18px;}
+  .qi{width:50px;font-size:14px;padding:6px 4px;}
+  .fb{width:34px;height:34px;font-size:18px;}
+  .ab{padding:10px 14px;font-size:12px;}
+  .rm{padding:9px 12px;font-size:13px;}
+  .pb{width:38px;height:38px;font-size:13px;}
+
+  /* readable bottom-tab labels + iPhone home-indicator safe area */
+  .tab-btn{font-size:10px;padding:8px 4px;letter-spacing:.3px;font-weight:800;}
+  .tabs{padding-bottom:env(safe-area-inset-bottom);}
+  .content{padding-bottom:calc(78px + env(safe-area-inset-bottom));}
+
+  /* stack search input above dept filter at full width */
+  .search-row{flex-direction:column;gap:8px;}
+  .sbox{min-width:0;width:100%;}
+  .fsel{width:100%;padding:12px;font-size:13px;}
+  .help-btn{align-self:flex-end;width:36px;height:36px;font-size:14px;}
+
+  /* section header — let action buttons wrap cleanly */
+  .sec-hd{align-items:stretch;}
+  .sec-a{justify-content:flex-end;flex-wrap:wrap;}
+  .sec-t{font-size:11px;}
+
+  /* modals fill more screen comfortably */
+  .mov{padding:10px;}
+  .modal{padding:18px;}
+  .help-modal-card{padding:18px;}
+
+  /* stats — fit nicely in 2 cols without crowding */
+  .sn{font-size:24px;}
+  .sl{font-size:9px;}
+  .stat-box{padding:12px 8px;}
+
+  /* history — tighter card */
+  .hcard{padding:14px;}
+  .hidesc{font-size:13px;}
+
+  /* admin & favorites — let inner rows wrap on narrow screens */
+  .krow{flex-wrap:wrap;}
+  .fav-card-inner{flex-wrap:wrap;}
+  .fav-desc-input{font-size:14px;padding:7px 8px;}
+
+  /* recent-search dropdown — bigger taps */
+  .recent-item{padding:11px 12px;}
+  .recent-text{font-size:14px;}
+
+  /* admin/export buttons — bigger taps */
+  .btn-primary,.btn-danger,.btn-ghost{padding:11px 16px;font-size:12px;}
+
+  /* login — slightly tighter card, bigger inputs and primary button */
+  .login-card{padding:22px 18px;}
+  .fg input{padding:13px 14px;font-size:15px;}
+  .role-btn{padding:14px 6px;}
+  .role-btn .ri{font-size:22px;}
+  .btn-login{padding:15px;font-size:13px;}
+}
+
+/* very narrow phones (≤360px) — collapse 2-col grids to single column */
+@media(max-width:360px){
+  .stats-row{grid-template-columns:1fr;}
+  .role-grid{grid-template-columns:1fr;}
+}
+
 @media(min-width:621px){.tab-btn .ticon{display:none;}}
 </style>
 </head>
