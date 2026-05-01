@@ -576,7 +576,7 @@ input,select{outline:none;font-family:inherit;}
       <div class="search-row">
         <div class="sbox">
           <span class="sico">🔍</span>
-          <input type="text" id="bQ" placeholder="Search — try partial words, abbreviations, typos..." oninput="dbBrowse()" onfocus="showRecentDropdown('bQ')" onblur="hideRecentDropdown('bQ');saveRecentSearch(this.value)" />
+          <input type="text" id="bQ" placeholder='Search Oracle, SAGE, or description — try "exact phrase", typos OK' oninput="dbBrowse()" onfocus="showRecentDropdown('bQ')" onblur="hideRecentDropdown('bQ');saveRecentSearch(this.value)" />
           <div id="bQ_recent" class="recent-dd"></div>
         </div>
         <select class="fsel" id="bDept" onchange="rstBrowse()">
@@ -663,7 +663,7 @@ input,select{outline:none;font-family:inherit;}
             </label>
             <span id="uploadFileName" style="font-size:12px;color:var(--muted);">No file selected</span>
           </div>
-          <div style="font-size:11px;color:var(--muted2);margin-top:7px;">Upload your Oracle ordering .xlsx file. The app will automatically parse and replace the current master list.</div>
+          <div style="font-size:11px;color:var(--muted2);margin-top:7px;">Pick a file and you'll see a preview where you can verify columns and choose how to apply: <strong>Merge</strong> (default — adds new + updates existing), <strong>Add only</strong>, <strong>Update only</strong>, or <strong>Replace</strong>. Layout doesn't have to be exact — auto-detection handles different column orders, header names ("Item Number" / "Part Number" / "P/N" etc.), and multi-sheet workbooks.</div>
         </div>
 
         <!-- Manual Add -->
@@ -827,7 +827,25 @@ var SYNONYM_GROUPS = [
   ['xfmr', 'transformer'],
   ['gnd', 'ground'],
   ['volt', 'voltage'],
-  ['std', 'standard']
+  ['std', 'standard'],
+  // Additional industrial-parts shorthand — distinctive (low collision risk)
+  ['ftng', 'fitting'],
+  ['hsg', 'housing'],
+  ['brg', 'bearing'],
+  ['shft', 'shaft'],
+  ['flng', 'flange'],
+  ['mtg', 'mount', 'mounting', 'mounted'],
+  ['cmpr', 'compressor'],
+  ['fltr', 'filter'],
+  ['snsr', 'sensor'],
+  ['cntrl', 'control'],
+  ['plg', 'plug'],
+  ['gge', 'gauge', 'gage'],
+  ['adj', 'adjustable'],
+  ['sw', 'switch'],
+  ['cyl', 'cylinder'],
+  ['sol', 'solenoid'],
+  ['lub', 'lube', 'lubricant', 'lubrication']
 ];
 
 // Build flat lookup: term → array of equivalent siblings
@@ -845,15 +863,35 @@ var SYNONYMS = (function(){
   return map;
 })();
 
+// Light English-plural stemmer for query tokens. Conservative — only fires
+// on tokens longer than 4 chars, so things like "as", "his", "axes" stay put.
+function _stem(s){
+  s = String(s||'').toLowerCase();
+  if(s.length <= 4) return s;
+  if(/[^aeiou]ies$/.test(s)) return s.slice(0,-3) + 'y';   // batteries → battery
+  if(/(sh|ch|x|s)es$/.test(s)) return s.slice(0,-2);        // brushes → brush, boxes → box
+  if(/[^s]s$/.test(s)) return s.slice(0,-1);                // valves → valve
+  return s;
+}
+
 // Expand a token to all its known aliases (original, hyphen-stripped,
-// synonyms, synonym hyphen-stripped). Returns deduplicated array.
+// synonyms, hyphen-stripped synonyms, plural stem, stem's synonyms).
+// Returns deduplicated array.
 function expandToken(t){
   var seen=Object.create(null), out=[];
   function add(s){if(s && !seen[s]){seen[s]=1;out.push(s);}}
+  var bare = t.replace(/-/g,'');
   add(t);
-  add(t.replace(/-/g,''));
-  var syn=SYNONYMS[t.replace(/-/g,'')];
+  add(bare);
+  var syn=SYNONYMS[bare];
   if(syn) syn.forEach(function(s){add(s);add(s.replace(/-/g,''));});
+  // Plural stem + its synonyms (so "valves" finds VLV, BATTERIES finds BTRY)
+  var stm = _stem(bare);
+  if(stm !== bare){
+    add(stm);
+    var synStm = SYNONYMS[stm];
+    if(synStm) synStm.forEach(function(s){add(s);add(s.replace(/-/g,''));});
+  }
   return out;
 }
 
@@ -873,8 +911,108 @@ function _ensureNormCache(parts){
   return _normCache;
 }
 
-// Tiered single-token search with synonym/abbreviation expansion.
-// Each token expands to its alias set; best tier across all aliases wins.
+// Vocabulary of unique words across all descriptions, used for typo
+// correction. Words ≥3 chars, lowercased, hyphen-stripped, must contain a
+// letter (skips pure-numeric tokens). Cached by parts-array reference.
+var _descVocab=null, _descVocabSrc=null;
+function _ensureDescVocab(parts){
+  if(_descVocabSrc===parts) return _descVocab;
+  var set=Object.create(null);
+  for(var i=0;i<parts.length;i++){
+    var d=String(parts[i][2]||'').toLowerCase().replace(/-/g,'');
+    var words=d.split(/[^a-z0-9]+/);
+    for(var j=0;j<words.length;j++){
+      var w=words[j];
+      if(w.length>=3 && /[a-z]/.test(w)) set[w]=1;
+    }
+  }
+  _descVocab=Object.keys(set);
+  _descVocabSrc=parts;
+  return _descVocab;
+}
+
+// Damerau-Levenshtein (Optimal String Alignment variant) — counts adjacent
+// transpositions as a single edit, so common typos like "vlave"→"valve" or
+// "bllt"→"blot" come back distance 1 instead of 2. Cap-based early exit.
+function _editDistance(a, b, cap){
+  if(a===b) return 0;
+  var la=a.length, lb=b.length;
+  if(la===0) return lb;
+  if(lb===0) return la;
+  if(Math.abs(la-lb) > cap) return cap+1;
+  // Full 2D matrix — strings are short (parts vocab words rarely > 20 chars).
+  var d=new Array(la+1);
+  for(var i=0;i<=la;i++){d[i]=new Array(lb+1); d[i][0]=i;}
+  for(var j=0;j<=lb;j++) d[0][j]=j;
+  for(var i=1;i<=la;i++){
+    var rowMin=d[i][0];
+    for(var j=1;j<=lb;j++){
+      var cost = a.charCodeAt(i-1)===b.charCodeAt(j-1)?0:1;
+      var v=d[i-1][j]+1;
+      if(d[i][j-1]+1 < v) v=d[i][j-1]+1;
+      if(d[i-1][j-1]+cost < v) v=d[i-1][j-1]+cost;
+      // Transposition: swap of adjacent chars
+      if(i>1 && j>1 &&
+         a.charCodeAt(i-1)===b.charCodeAt(j-2) &&
+         a.charCodeAt(i-2)===b.charCodeAt(j-1) &&
+         d[i-2][j-2]+1 < v) v=d[i-2][j-2]+1;
+      d[i][j]=v;
+      if(v<rowMin) rowMin=v;
+    }
+    if(rowMin > cap) return cap+1;
+  }
+  return d[la][lb];
+}
+
+// Find nearest description-vocabulary word to a query token. Returns the
+// corrected word, or null if nothing within the edit-distance threshold.
+// Threshold scales with token length so short tokens demand a tighter match.
+function _correctToken(token, parts){
+  var t=String(token||'').toLowerCase().replace(/-/g,'');
+  if(t.length<3) return null;
+  // Don't correct numeric tokens — they're usually IDs/sizes.
+  if(!/[a-z]/.test(t)) return null;
+  var vocab=_ensureDescVocab(parts);
+  var maxDist = t.length<=5 ? 1 : 2;
+  var best=null, bestDist=maxDist+1;
+  for(var i=0;i<vocab.length;i++){
+    var w=vocab[i];
+    if(Math.abs(w.length - t.length) > maxDist) continue;
+    var d=_editDistance(t, w, maxDist);
+    if(d<bestDist){ bestDist=d; best=w; if(d===0) break; }
+  }
+  return (best && best!==t) ? best : null;
+}
+
+// Word-boundary check: is this charCode part of a "word" ([a-z0-9])?
+function _isWordCh(cc){return (cc>=97&&cc<=122)||(cc>=48&&cc<=57);}
+
+// Find best match tier for a needle inside a normalized description.
+// Tier 3 = whole word, 4 = word-start, 5 = mid-word substring.
+// Returns null on no match.
+function _descMatchTier(needle, descNorm){
+  if(!needle || !descNorm) return null;
+  var idx=0, best=null, n=needle.length, dl=descNorm.length;
+  while((idx=descNorm.indexOf(needle, idx))!==-1){
+    var beforeOK = idx===0 || !_isWordCh(descNorm.charCodeAt(idx-1));
+    var afterIdx = idx + n;
+    var afterOK = afterIdx>=dl || !_isWordCh(descNorm.charCodeAt(afterIdx));
+    var tier = (beforeOK && afterOK) ? 3 : (beforeOK ? 4 : 5);
+    if(best===null || tier<best) best=tier;
+    if(best===3) return 3;          // can't beat whole-word
+    idx++;
+  }
+  return best;
+}
+
+// Tiered single-token search with synonym/abbreviation expansion AND
+// word-boundary boost in description matching.
+//   Tier 0: exact match on Oracle or SAGE
+//   Tier 1: prefix match on Oracle or SAGE
+//   Tier 2: substring match on Oracle or SAGE
+//   Tier 3: whole word in description
+//   Tier 4: word-start in description
+//   Tier 5: mid-word substring in description
 // Returns {partIdx: tier} where lower tier = better match.
 function _tokenMatches(token, parts){
   var aliases=expandToken(token.toLowerCase()).map(function(a){return a.replace(/-/g,'');});
@@ -887,45 +1025,115 @@ function _tokenMatches(token, parts){
     var bestTier=null;
     for(var a=0;a<aliases.length;a++){
       var al=aliases[a],tier;
-      if(c.o===al||c.s===al)tier=0;
-      else if(c.o.indexOf(al)===0||c.s.indexOf(al)===0)tier=1;
-      else if(c.o.indexOf(al)>=0||c.s.indexOf(al)>=0)tier=2;
-      else if(c.d.indexOf(al)>=0)tier=3;
-      else continue;
-      if(bestTier===null||tier<bestTier)bestTier=tier;
+      if(c.o===al||c.s===al) tier=0;
+      else if(c.o.indexOf(al)===0||c.s.indexOf(al)===0) tier=1;
+      else if(c.o.indexOf(al)>=0||c.s.indexOf(al)>=0) tier=2;
+      else {
+        tier=_descMatchTier(al, c.d);
+        if(tier===null) continue;
+      }
+      if(bestTier===null||tier<bestTier) bestTier=tier;
     }
-    if(bestTier!==null)result[i]=bestTier;
+    if(bestTier!==null) result[i]=bestTier;
   }
   return result;
 }
 
-// Smart search: handles single-token (tiered ID-first) and multi-token (AND
-// across all tokens, ranked by aggregate tier). Falls back to Fuse fuzzy when
-// substring matching returns nothing — handles typos.
+// Phrase matcher for "quoted phrases" — literal contiguous match.
+// Tries the spaced form first, then a tight (no-space) form so that
+// "o ring" still finds the description "O-RING" (hyphens are stripped
+// in the cache).
+function _phraseMatches(phrase, parts){
+  var pSpaced=String(phrase||'').toLowerCase().replace(/-/g,'').replace(/\s+/g,' ').trim();
+  if(!pSpaced) return {};
+  var pTight=pSpaced.replace(/\s+/g,'');
+  var cache=_ensureNormCache(parts);
+  var result=Object.create(null);
+  for(var i=0;i<parts.length;i++){
+    var c=cache[i];
+    if(c.o===pTight||c.s===pTight){result[i]=0; continue;}
+    if(c.o.indexOf(pTight)===0||c.s.indexOf(pTight)===0){result[i]=1; continue;}
+    if(c.o.indexOf(pTight)>=0||c.s.indexOf(pTight)>=0){result[i]=2; continue;}
+    var t1=_descMatchTier(pSpaced, c.d);
+    var t2=(pTight!==pSpaced)?_descMatchTier(pTight, c.d):null;
+    var dt;
+    if(t1===null) dt=t2;
+    else if(t2===null) dt=t1;
+    else dt=Math.min(t1, t2);
+    if(dt!==null) result[i]=dt;
+  }
+  return result;
+}
+
+// Smart search: handles "quoted phrases", multi-token AND with synonym /
+// abbreviation expansion, plural stemming, word-boundary ranking, and
+// per-token typo correction. Falls back to Fuse fuzzy when substring AND
+// yields nothing on the whole query.
+//
+// The returned array carries `_corrections` (typo fixes that were applied)
+// and `_wasFuzzy` (whether the fuzzy fallback fired) so callers can show
+// "Did you mean" feedback to the user.
 function smartSearch(q, parts, fuse){
   var trimmed=(q||'').trim();
-  if(!trimmed||!fuse)return [];
-  var tokens=trimmed.split(/\s+/).filter(Boolean);
-  // Per-token substring matches
-  var sets=tokens.map(function(t){return _tokenMatches(t,parts);});
-  // Intersection: indices present in ALL token match sets
-  var ranked=[];
-  var first=sets[0];
+  if(!trimmed||!fuse) return _attachMeta([], [], false);
+
+  // Pull out "quoted phrases" first; everything else splits on whitespace.
+  var tokens=[], phraseRe=/"([^"]+)"/g, m, lastIdx=0, leftover='';
+  while((m=phraseRe.exec(trimmed))!==null){
+    leftover+=trimmed.slice(lastIdx, m.index)+' ';
+    var ph=m[1].trim();
+    if(ph) tokens.push({v:ph, p:true});
+    lastIdx=phraseRe.lastIndex;
+  }
+  leftover+=trimmed.slice(lastIdx);
+  leftover.split(/\s+/).filter(Boolean).forEach(function(w){tokens.push({v:w, p:false});});
+  if(!tokens.length) return _attachMeta([], [], false);
+
+  // Per-token match sets. If a non-phrase token misses entirely, try a typo
+  // correction against the description vocabulary and retry once.
+  var corrections=[];
+  var sets=tokens.map(function(tok){
+    if(tok.p) return _phraseMatches(tok.v, parts);
+    var s=_tokenMatches(tok.v, parts);
+    if(Object.keys(s).length===0){
+      var corrected=_correctToken(tok.v, parts);
+      if(corrected){
+        var s2=_tokenMatches(corrected, parts);
+        if(Object.keys(s2).length>0){
+          corrections.push({from:tok.v, to:corrected});
+          return s2;
+        }
+      }
+    }
+    return s;
+  });
+
+  // Intersection: every token (or its corrected form) must match.
+  var ranked=[], first=sets[0];
   for(var k in first){
-    var inAll=true,totalTier=first[k];
+    var inAll=true, totalTier=first[k];
     for(var s=1;s<sets.length;s++){
-      if(sets[s][k]===undefined){inAll=false;break;}
+      if(sets[s][k]===undefined){inAll=false; break;}
       totalTier+=sets[s][k];
     }
-    if(inAll)ranked.push({i:+k,t:totalTier});
+    if(inAll) ranked.push({i:+k, t:totalTier});
   }
   ranked.sort(function(a,b){return a.t-b.t;});
-  // Substring AND found nothing — fall back to fuzzy on the whole query
+
   if(!ranked.length){
+    // Last resort: full-query fuzzy via Fuse.
     var fuzzy=fuse.search(trimmed,{limit:500});
-    return fuzzy.map(function(r){return{item:{i:r.item.i}};});
+    return _attachMeta(fuzzy.map(function(r){return{item:{i:r.item.i}};}), corrections, true);
   }
-  return ranked.map(function(r){return{item:{i:r.i}};});
+  return _attachMeta(ranked.map(function(r){return{item:{i:r.i}};}), corrections, false);
+}
+
+// Tag a results array with metadata so the UI can show "Did you mean" hints
+// and distinguish fuzzy-fallback hits from clean matches.
+function _attachMeta(arr, corrections, wasFuzzy){
+  arr._corrections=corrections;
+  arr._wasFuzzy=wasFuzzy;
+  return arr;
 }
 
 // ── RECENT SEARCHES ─────────────────────────────────────────
@@ -997,9 +1205,11 @@ const SK={o:'f6_ord',k:'f6_kp',h:'f6_hi',b:'f6_ob'};
 var favNicks={};  // {oracle: nickname} per role
 var favColors={}; // {oracle: colorKey} per role
 var favGroups={}; // {colorKey: groupName} per role
+var favSnapshots={}; // {oracle: [oracle,sage,desc,uom,dept]} per role — preserves favorites if a part disappears from the active catalog (e.g. after XLSX upload)
 function nickKey(){ return 'f6_nk_'+(user?user.role:'def'); }
 function colorKey(){ return 'f6_cl_'+(user?user.role:'def'); }
 function groupKey(){ return 'f6_gn_'+(user?user.role:'def'); }
+function snapKey(){ return 'f6_sn_'+(user?user.role:'def'); }
 
 // Each department gets its own favorites list
 function favsKey(){ return 'f6_fv_' + (user ? user.role : 'default'); }
@@ -1090,7 +1300,23 @@ function fbInit(){
       if(typeof getActiveParts==='function' && typeof buildFuse==='function') {
         try{ fuseIndex = buildFuse(getActiveParts()); }catch(e){}
       }
+      // Refresh fav snapshots against the new active parts — captures any
+      // legacy favorites that didn't have snapshots yet AND brings existing
+      // snapshots in line with any updated descriptions/sage/uom.
+      if(typeof _backfillFavSnapshots==='function'){
+        try{ _backfillFavSnapshots(); }catch(e){}
+      }
       _rerender();
+      if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
+    });
+    fbDb.ref('customPartsBackup').on('value', function(snap){
+      // Mirror the backup record locally so any admin in any session can
+      // see the same restore option with the same timestamp.
+      var v = snap.val();
+      try{
+        if(v == null) localStorage.removeItem(CUSTOM_PARTS_BACKUP_KEY);
+        else localStorage.setItem(CUSTOM_PARTS_BACKUP_KEY, JSON.stringify(v));
+      }catch(e){}
       if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
     });
     fbDb.ref('deptOverrides').on('value', function(snap){
@@ -1127,10 +1353,11 @@ function fbAttachRoleListeners(){
     ref.on('value', cb);
     roleListeners.push(function(){ ref.off('value', cb); });
   }
-  attach('favs/'+role,   function(v){ favs = v; },      favsKey());
+  attach('favs/'+role,   function(v){ favs = v; if(typeof _backfillFavSnapshots==='function'){ try{ _backfillFavSnapshots(); }catch(e){} } },      favsKey());
   attach('nicks/'+role,  function(v){ favNicks = v; },  nickKey());
   attach('colors/'+role, function(v){ favColors = v; }, colorKey());
   attach('groups/'+role, function(v){ favGroups = v; }, groupKey());
+  attach('snaps/'+role,  function(v){ favSnapshots = v; if(typeof _backfillFavSnapshots==='function'){ try{ _backfillFavSnapshots(); }catch(e){} } }, snapKey());
 }
 
 function _rerender(){
@@ -1161,6 +1388,7 @@ function _fbFlush(){
     fbDb.ref('nicks/'+role).set(favNicks || {});
     fbDb.ref('colors/'+role).set(favColors || {});
     fbDb.ref('groups/'+role).set(favGroups || {});
+    fbDb.ref('snaps/'+role).set(favSnapshots || {});
   } catch(e){ console.error('[Firebase] flush failed:', e); }
 }
 
@@ -1174,6 +1402,7 @@ function save(){
     localStorage.setItem(nickKey(),JSON.stringify(favNicks));
     localStorage.setItem(colorKey(),JSON.stringify(favColors));
     localStorage.setItem(groupKey(),JSON.stringify(favGroups));
+    localStorage.setItem(snapKey(),JSON.stringify(favSnapshots));
     localStorage.setItem(SK.h,JSON.stringify(hist));
   }catch(e){}
   // Debounced cloud write (consolidates rapid keystrokes)
@@ -1190,9 +1419,10 @@ function load(){
     favNicks=JSON.parse(localStorage.getItem(nickKey())||'{}');
     favColors=JSON.parse(localStorage.getItem(colorKey())||'{}');
     favGroups=JSON.parse(localStorage.getItem(groupKey())||'{}');
+    favSnapshots=JSON.parse(localStorage.getItem(snapKey())||'{}');
     hist=JSON.parse(localStorage.getItem(SK.h)||'[]');
     deptOverrides=JSON.parse(localStorage.getItem('f6_dept_overrides')||'{}');
-  }catch(e){order={};orderBy={};keep={};favs={};favGroups={};hist=[];deptOverrides={};}
+  }catch(e){order={};orderBy={};keep={};favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};}
 }
 
 // ── LOGIN ───────────────────────────────────────────────────
@@ -1306,7 +1536,25 @@ function badges(){
   document.getElementById('fBadge').textContent=Object.keys(favs).length;
 }
 function renderAll(){renderOrder();renderBrowse();badges();}
-function gp(o){return PARTS.find(p=>p[0]===o);}
+// Look up a part by its Oracle #. Search order: active parts (which respects
+// custom uploads), then bundled PARTS, then the favSnapshots cache (so an
+// orphaned-but-favorited part still renders correctly in the order/history
+// views even though its Oracle # isn't in the current catalog).
+function gp(o){
+  try{
+    if(typeof getActiveParts==='function'){
+      var ap=getActiveParts();
+      for(var i=0;i<ap.length;i++) if(ap[i][0]===o) return ap[i];
+    }
+  }catch(e){}
+  var hit=PARTS.find(function(p){return p[0]===o;});
+  if(hit) return hit;
+  if(typeof favSnapshots!=='undefined' && favSnapshots && favSnapshots[o]){
+    var s=favSnapshots[o];
+    return [s[0], s[1], s[2], s[3], s[4]];
+  }
+  return undefined;
+}
 function e(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // ── ORDER ACTIONS ────────────────────────────────────────────
@@ -1344,7 +1592,59 @@ function rmP(oracle){
   save();badges();renderOrder();toast('Removed');
   if(user) writeLog('REMOVE', p?p[2]:'Oracle #'+oracle, '', user.name, user.role);
 }
-function togF(oracle,btn){if(favs[oracle])delete favs[oracle];else favs[oracle]=true;if(btn)btn.textContent=favs[oracle]?'⭐':'☆';save();badges();}
+// Capture / refresh snapshots for every favorite whose Oracle # is in the
+// active parts list. Two jobs:
+//   1. Backfill: legacy favorites that existed before snapshots were a
+//      thing — first time we see them with active data, snapshot them.
+//   2. Refresh: when active data changes (e.g. an XLSX update tweaks the
+//      description for an existing Oracle #), bring the snapshot in line
+//      so a future orphan would render the latest known data, not stale.
+// Favorites NOT in active are left alone — their existing snapshot is all
+// the data we still have for them.
+function _backfillFavSnapshots(){
+  if(!favs || typeof getActiveParts!=='function') return false;
+  var active;
+  try{ active = getActiveParts(); }catch(e){ return false; }
+  if(!active || !active.length) return false;
+  var byOracle=Object.create(null);
+  for(var i=0;i<active.length;i++) byOracle[active[i][0]] = active[i];
+  if(!favSnapshots) favSnapshots = {};
+  var changed=false;
+  Object.keys(favs).forEach(function(o){
+    var p=byOracle[o];
+    if(!p) return;
+    var existing=favSnapshots[o];
+    if(!existing
+        || existing[0]!==p[0] || existing[1]!==p[1] || existing[2]!==p[2]
+        || existing[3]!==p[3] || existing[4]!==p[4]){
+      favSnapshots[o]=[p[0], p[1], p[2], p[3], p[4]];
+      changed=true;
+    }
+  });
+  if(changed){ try{ save(); }catch(e){} }
+  return changed;
+}
+
+function togF(oracle,btn){
+  if(favs[oracle]){
+    delete favs[oracle];
+    if(favSnapshots && favSnapshots[oracle]) delete favSnapshots[oracle];
+  } else {
+    favs[oracle]=true;
+    // Capture a snapshot so the favorite survives if a future XLSX upload
+    // doesn't include this Oracle # — the card will still render from the snapshot.
+    try{
+      var src = (typeof getActiveParts==='function') ? getActiveParts() : (typeof PARTS!=='undefined'?PARTS:null);
+      if(src){
+        var p = src.find(function(x){return x[0]===oracle;});
+        if(p) favSnapshots[oracle] = [p[0], p[1], p[2], p[3], p[4]];
+      }
+    }catch(e){}
+  }
+  if(btn)btn.textContent=favs[oracle]?'⭐':'☆';
+  save();
+  badges();
+}
 
 // ── ORDER TAB ───────────────────────────────────────────────
 function renderOrder(){
@@ -1419,17 +1719,30 @@ function renderBrowse(){
   renderPag(Math.ceil(tot/PG));
 }
 
-// Simple highlight: bold matching chars
+// Bold matching chars — phrase-aware and synonym/stem-aware.
 function highlight(text, query){
   if(!query)return e(text);
-  var words=query.trim().split(/\s+/).filter(Boolean);
-  if(!words.length)return e(text);
+  var trimmed=String(query).trim();
+  if(!trimmed)return e(text);
   var seen=Object.create(null), terms=[];
-  words.forEach(function(w){
-    expandToken(w.toLowerCase()).forEach(function(a){
-      // Skip <2 char aliases — too noisy in highlighting
-      if(a.length>=2 && !seen[a]){seen[a]=1;terms.push(a);}
-    });
+  function addTerm(s){
+    if(s && s.length>=2 && !seen[s.toLowerCase()]){
+      seen[s.toLowerCase()]=1;
+      terms.push(s);
+    }
+  }
+  // Pull phrases out first so quoted spans stay intact
+  var phraseRe=/"([^"]+)"/g, m, lastIdx=0, leftover='';
+  while((m=phraseRe.exec(trimmed))!==null){
+    leftover+=trimmed.slice(lastIdx, m.index)+' ';
+    var ph=m[1].trim();
+    if(ph) addTerm(ph);
+    lastIdx=phraseRe.lastIndex;
+  }
+  leftover+=trimmed.slice(lastIdx);
+  // Bare tokens — expand via synonyms + stem so highlighting tracks matching
+  leftover.split(/\s+/).filter(Boolean).forEach(function(w){
+    expandToken(w.toLowerCase()).forEach(addTerm);
   });
   if(!terms.length)return e(text);
   // Sort longest first so alternation prefers longer matches when overlapping
@@ -1486,16 +1799,66 @@ function renderFavs(){
   var q=(document.getElementById('fQ').value||'').trim();
   var dept=document.getElementById('fDept').value;
   var activeParts=(typeof getActiveParts==='function')?getActiveParts():PARTS;
+
+  // Backfill / refresh snapshots from active parts. Idempotent — only writes
+  // when something is missing or stale. (Same helper runs on Firebase syncs
+  // too, so by the time we get here it's usually a no-op.)
+  if(typeof _backfillFavSnapshots==='function') _backfillFavSnapshots();
+  var oracleInActive=Object.create(null);
+  activeParts.forEach(function(p){oracleInActive[p[0]]=p;});
+
+  // Build the combined favorites pool: live parts (canonical) + orphan
+  // snapshots (favorites whose Oracle # is no longer in the active list).
+  // Orphan parts are tagged with _orphan=true so favCard renders them with
+  // a "Not in current catalog" indicator.
+  var favPool=[];
+  Object.keys(favs||{}).forEach(function(o){
+    if(oracleInActive[o]){
+      favPool.push(oracleInActive[o]);
+    } else if(favSnapshots && favSnapshots[o]){
+      var snap=favSnapshots[o];
+      // Apply per-part dept override if user reclassified it after favoriting.
+      var d=(typeof deptOverrides!=='undefined' && deptOverrides && (o in deptOverrides))?deptOverrides[o]:snap[4];
+      var p=[snap[0], snap[1], snap[2], snap[3], d];
+      p._orphan=true;
+      favPool.push(p);
+    }
+  });
+  var orphanCount=favPool.filter(function(p){return p._orphan;}).length;
+
   var fp;
+  var meta=null;
   if(!q){
-    fp=activeParts.filter(function(p){return favs[p[0]]&&(dept===''||p[4]==dept);});
+    fp=favPool.filter(function(p){return dept===''||p[4]==dept;});
   } else {
-    if(!fuseIndex)fuseIndex=buildFuse(activeParts);
-    var raw=smartSearch(q,activeParts,fuseIndex);
-    fp=raw.map(function(r){return activeParts[r.item.i];}).filter(function(p){return favs[p[0]]&&(dept===''||p[4]==dept);});
+    // Search across the favorites pool itself (including orphans). A small
+    // dedicated Fuse index keeps the engine identical to Master List search.
+    var favFuse=buildFuse(favPool);
+    var raw=smartSearch(q, favPool, favFuse);
+    meta={corrections: raw._corrections||[], wasFuzzy: !!raw._wasFuzzy};
+    fp=raw.map(function(r){return favPool[r.item.i];}).filter(function(p){return dept===''||p[4]==dept;});
+    // Also match against user-edited nicknames (favNicks).
+    // Multi-word, case-insensitive — every word in the query must appear in the nickname.
+    var qWords=q.toLowerCase().split(/\s+/).filter(Boolean);
+    if(qWords.length){
+      var seen={};
+      fp.forEach(function(p){seen[p[0]]=true;});
+      favPool.forEach(function(p){
+        if(seen[p[0]])return;
+        if(dept!==''&&p[4]!=dept)return;
+        var nick=favNicks[p[0]];
+        if(!nick)return;
+        var nl=String(nick).toLowerCase();
+        var allMatch=qWords.every(function(w){return nl.indexOf(w)!==-1;});
+        if(allMatch){fp.push(p);seen[p[0]]=true;}
+      });
+    }
   }
   if(!fp.length){
-    document.getElementById('fList').innerHTML='<div class="empty"><div class="ei">⭐</div><p>No favorites yet.<br>Star parts from the Master List to build your list.</p></div>';
+    var emptyMsg = q
+      ? '<div class="empty"><div class="ei">🔍</div><p>No favorites match "<strong>'+e(q)+'</strong>".</p></div>'
+      : '<div class="empty"><div class="ei">⭐</div><p>No favorites yet.<br>Star parts from the Master List to build your list.</p></div>';
+    document.getElementById('fList').innerHTML=emptyMsg;
     return;
   }
   // Sort by color group then by label/desc
@@ -1509,7 +1872,23 @@ function renderFavs(){
     var nb=(typeof favNicks!=='undefined'&&favNicks[b[0]])||b[2];
     return na.localeCompare(nb);
   });
-  var html='', lastColor=null;
+  var html='';
+  // Banner: "X favorites are no longer in the current catalog" — preserved via snapshot.
+  if(orphanCount>0){
+    html+='<div style="font-size:12px;background:rgba(212,150,10,0.12);border:1px solid rgba(212,150,10,0.45);border-radius:2px;padding:8px 10px;margin-bottom:8px;color:#f0b040;">'+
+      '⚠ '+orphanCount+' favorite'+(orphanCount===1?' is':'s are')+' not in the current parts catalog. '+
+      'They\'re preserved from your last snapshot — un-star to remove, or wait for the next XLSX upload that includes them.'+
+      ' &nbsp;<button onclick="removeOrphanFavs()" style="background:transparent;border:1px solid rgba(212,150,10,0.6);color:#f0b040;padding:2px 8px;border-radius:2px;font-size:11px;cursor:pointer;">Remove all '+orphanCount+'</button>'+
+      '</div>';
+  }
+  // Search-meta banner: show "Did you mean" when typo correction was applied
+  if(q && meta && meta.corrections && meta.corrections.length){
+    var fixes=meta.corrections.map(function(c){
+      return '<em>'+e(c.from)+'</em> → <strong style="color:var(--teal)">'+e(c.to)+'</strong>';
+    }).join(', ');
+    html+='<div style="font-size:11px;color:var(--muted);letter-spacing:.5px;padding:4px 0 8px;">Did you mean: '+fixes+'</div>';
+  }
+  var lastColor=null;
   fp.forEach(function(p){
     var ck=(typeof favColors!=='undefined'&&favColors[p[0]])||'none';
     if(ck!==lastColor&&typeof FAV_COLORS!=='undefined'&&ck!=='none'){
@@ -1521,6 +1900,27 @@ function renderFavs(){
     html+=(typeof favCard!=='undefined')?favCard(p):pCard(p);
   });
   document.getElementById('fList').innerHTML=html;
+}
+
+// Bulk-clear all orphan favorites (those whose Oracle # isn't in the
+// currently active parts list). Confirms first; preserves non-orphans.
+function removeOrphanFavs(){
+  var activeParts=(typeof getActiveParts==='function')?getActiveParts():PARTS;
+  var inActive=Object.create(null);
+  activeParts.forEach(function(p){inActive[p[0]]=true;});
+  var toRemove=Object.keys(favs||{}).filter(function(o){return !inActive[o];});
+  if(!toRemove.length){ if(typeof toast==='function') toast('No orphan favorites to remove'); return; }
+  if(!confirm('Remove '+toRemove.length+' favorite'+(toRemove.length===1?'':'s')+' that are no longer in the parts catalog? This also clears their nickname/color/group settings.')) return;
+  toRemove.forEach(function(o){
+    delete favs[o];
+    if(favSnapshots) delete favSnapshots[o];
+    if(favNicks) delete favNicks[o];
+    if(favColors) delete favColors[o];
+  });
+  save();
+  badges();
+  renderFavs();
+  if(typeof toast==='function') toast('Removed '+toRemove.length+' orphan favorite'+(toRemove.length===1?'':'s'));
 }
 
 // ── PAGINATION ────────────────────────────────────────────────
@@ -1586,6 +1986,9 @@ function toggleHist(i){
 
 // ── ADMIN ──────────────────────────────────────────────────
 function renderAdmin(){
+  // Refresh catalog status so the Export/Restore buttons render correctly
+  // and reflect the current backup timestamp every time the admin tab opens.
+  if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
   const items=Object.entries(order).filter(([o,q])=>q>0);
   if(!items.length){
     document.getElementById('kList').innerHTML='<div class="empty"><div class="ei">✅</div><p>No items in the current order.</p></div>';
@@ -1737,6 +2140,25 @@ function clearEventLog() {
 
 
 <!-- HELP MODAL ─────────────────────────────────────────────── -->
+<!-- ─── XLSX IMPORT PREVIEW MODAL ─────────────────────────────
+     Shown after a file is picked. Auto-detects sheet + columns, lets the
+     admin verify or override, choose an apply mode, and see exactly what
+     will change before any data is written. -->
+<div id="mXlsxImport" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9000;flex-direction:column;">
+  <div style="background:#141414;border-bottom:1px solid #363636;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <div>
+      <div style="font-size:15px;font-weight:800;color:#f0f0f0;letter-spacing:.5px;">📥 Import Parts from XLSX</div>
+      <div id="xlsxImportSubtitle" style="font-size:11px;color:#888;margin-top:3px;">Verify the column mapping and choose how to apply</div>
+    </div>
+    <button onclick="_xlsxClosePreview()" style="background:rgba(255,255,255,0.07);color:#999;border:1px solid #363636;border-radius:2px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;">✕ Close</button>
+  </div>
+  <div id="xlsxImportBody" style="flex:1;overflow-y:auto;padding:20px;max-width:920px;margin:0 auto;width:100%;box-sizing:border-box;"></div>
+  <div style="background:#141414;border-top:1px solid #363636;padding:12px 20px;display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-shrink:0;">
+    <button onclick="_xlsxClosePreview()" style="background:transparent;color:#999;border:1px solid #363636;border-radius:2px;padding:9px 18px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.8px;">Cancel</button>
+    <button id="xlsxApplyBtn" onclick="_xlsxApply()" style="background:var(--teal);color:#fff;border:0;border-radius:2px;padding:9px 22px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.8px;">Apply Import →</button>
+  </div>
+</div>
+
 <div id="mHelp" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9000;flex-direction:column;">
   <div style="background:#141414;border-bottom:1px solid #363636;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
     <div>
@@ -1783,9 +2205,13 @@ var HELP_CONTENT = {
       { heading: "How search works",
         items: [
           "Search Oracle #, SAGE #, or description in one box. <strong>Exact ID matches always come first.</strong>",
+          "<strong>Word matches rank higher than partial matches</strong> — searching <code>valve</code> puts \"BALL VALVE\" above \"DEADBOLT VALVED\".",
           "Multi-word searches require <strong>all words</strong> to match. <code>valve seat 4.5</code> finds parts that contain all three.",
-          "Abbreviations work: <code>blt</code> finds BOLT, <code>wshr</code> finds WASHER, <code>oring</code> finds O-RING. About 25 industrial shorthand terms are recognized.",
-          "If a search returns nothing, the system falls back to fuzzy matching to catch typos.",
+          "Wrap a phrase in quotes to search it literally: <code>\"check valve\"</code> only matches that exact phrase.",
+          "Plurals work both ways: <code>valves</code> finds VALVE, and <code>valve</code> finds VALVES.",
+          "Abbreviations work: <code>blt</code> finds BOLT, <code>wshr</code> finds WASHER, <code>oring</code> finds O-RING. ~40 industrial shorthand terms recognized.",
+          "Typos are auto-corrected per word (e.g. <code>vlave</code> → <code>valve</code>). The correction is shown above the results so you know what was searched.",
+          "If nothing matches, the system falls back to fuzzy matching across the whole query.",
         ]
       },
       { heading: "Recent searches",
@@ -1821,7 +2247,8 @@ var HELP_CONTENT = {
       },
       { heading: "Search",
         items: [
-          "Search uses the same engine as Master List — abbreviations, multi-word, and recent searches all work here too.",
+          "Search uses the same engine as Master List — quoted phrases, abbreviations, plurals, typos, and word-boundary ranking all work here too.",
+          "Favorites search also matches <strong>your custom nicknames</strong>, not just the original part description.",
         ]
       }
     ]
@@ -1860,6 +2287,28 @@ var HELP_CONTENT = {
           "<strong>📝 View Event Log</strong> shows every parts add and remove with timestamps, the user who did it, and their dept profile. Use it to investigate \"who changed what and when.\"",
           "<strong>Clear Log</strong> wipes the entire log. Like resets, this can't be undone.",
         ]
+      },
+      { heading: "Uploading a new XLSX",
+        items: [
+          "Pick a file and you'll see a <strong>preview modal</strong> before anything changes. You can verify or override the column mapping (Oracle, Description, SAGE, UOM, Org filter) and choose how to apply.",
+          "Layout doesn't have to match exactly — auto-detection handles \"Item Number\" / \"Part Number\" / \"P/N\" / \"Material Number\" for Oracle, plus similar variants for the other columns. Multi-sheet workbooks are scanned and the best sheet is pre-selected.",
+          "<strong>Merge (default)</strong> — adds new parts and updates existing ones. Nothing is removed. Safe for files that contain only additions or only updates.",
+          "<strong>Add only</strong> — only inserts Oracle #s that aren't already in the catalog. Existing parts are left untouched.",
+          "<strong>Update only</strong> — refreshes SAGE / description / UOM on existing parts. Ignores new entries.",
+          "<strong>Replace</strong> — wipes the current catalog and installs only what's in the file. The only mode that can orphan favorites — you'll see a list of which favorites would be affected before it commits.",
+          "In Merge / Update modes, <strong>department classifications are preserved</strong> on existing parts. Manual dept corrections aren't clobbered by uploads.",
+        ]
+      },
+      { heading: "💾 Export Catalog vs ↩ Restore Previous",
+        items: [
+          "<strong>Export Catalog</strong> downloads the current parts list as an .xlsx file. Use it for archival, sharing, or sending a snapshot to a colleague. The file can be re-imported later, but department classifications will run again on import (so user-corrected depts may shift slightly).",
+          "<strong>Restore Previous</strong> is one-click instant rollback to the catalog state right before your last change. Preserves <em>everything</em> exactly — including dept overrides, custom edits, and manual additions.",
+          "<strong>Quick rule:</strong> Restore = quick undo of your last change. Export = save a copy for later.",
+          "Restore only goes <strong>one step back</strong>. For older versions, re-import a previously-exported XLSX.",
+          "Restore is an <strong>atomic swap</strong> — clicking it puts the current state into the backup slot, so you can click Restore again to un-do the restore. 1-deep undo/redo.",
+          "A backup is taken <strong>automatically</strong> every time the catalog changes (upload, manual add/edit/delete, reset). You don't have to remember to back up.",
+          "Backups sync via Firebase, so any admin in any session sees the same restore option. If admin A makes a bad change at 2pm, admin B can roll it back at 3pm.",
+        ]
       }
     ]
   }
@@ -1896,7 +2345,12 @@ document.addEventListener('keydown', function(ev){
 <script>
 // ── CUSTOM PARTS MANAGEMENT ──────────────────────────────────
 var CUSTOM_PARTS_KEY = 'f6_custom_parts';
-function _setCustomParts(parts){
+var CUSTOM_PARTS_BACKUP_KEY = 'f6_custom_parts_backup';
+
+// Apply a catalog state to localStorage and Firebase, WITHOUT taking a
+// fresh backup. Used internally by both _setCustomParts (after backup)
+// and restoreCatalogBackup (which does its own atomic swap).
+function _applyCatalogState(parts){
   if(parts == null){
     localStorage.removeItem(CUSTOM_PARTS_KEY);
     if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customParts').remove(); }catch(e){} }
@@ -1904,6 +2358,221 @@ function _setCustomParts(parts){
     localStorage.setItem(CUSTOM_PARTS_KEY, JSON.stringify(parts));
     if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customParts').set(parts); }catch(e){} }
   }
+}
+
+// Snapshot the CURRENT catalog state into the backup slot. parts==null in
+// the backup record means "was using bundled-default PARTS at backup time"
+// (i.e. no custom upload was active). Backup includes a timestamp so the
+// UI can show "Backed up at 3:45 PM".
+function _saveCatalogBackup(){
+  try{
+    var cur=localStorage.getItem(CUSTOM_PARTS_KEY);
+    var record={
+      ts: Date.now(),
+      parts: cur ? JSON.parse(cur) : null
+    };
+    localStorage.setItem(CUSTOM_PARTS_BACKUP_KEY, JSON.stringify(record));
+    if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customPartsBackup').set(record); }catch(e){} }
+  }catch(e){
+    console.warn('[backup] save failed (likely localStorage quota):', e);
+  }
+}
+
+// _setCustomParts is the choke point for every catalog mutation (upload,
+// reset, manual add/edit/delete). Backup runs FIRST so the pre-change
+// state is always recoverable via "Restore Previous" — even if the change
+// itself fails partway through.
+function _setCustomParts(parts){
+  _saveCatalogBackup();
+  _applyCatalogState(parts);
+}
+
+// Read the most recent backup record. Returns null if none exists.
+function getCatalogBackup(){
+  try{
+    var raw=localStorage.getItem(CUSTOM_PARTS_BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+
+// Restore the catalog to the backup state. Atomic swap: the CURRENT state
+// becomes the new backup (so the user can undo the restore by clicking
+// Restore again). 1-deep undo/redo, which covers the 95% case of "I just
+// uploaded the wrong file, take me back."
+function restoreCatalogBackup(){
+  var backup=getCatalogBackup();
+  if(!backup){ alert('No backup available to restore.'); return; }
+  var when=new Date(backup.ts).toLocaleString();
+  var sizeNow;
+  try{
+    var cur=localStorage.getItem(CUSTOM_PARTS_KEY);
+    sizeNow = cur ? JSON.parse(cur).length : (typeof PARTS!=='undefined'?PARTS.length:0);
+  }catch(e){ sizeNow=0; }
+  var sizeBack = backup.parts ? backup.parts.length : (typeof PARTS!=='undefined'?PARTS.length:0);
+  if(!confirm(
+    'Restore the catalog to its state from '+when+'?\n\n'+
+    'Current: '+sizeNow.toLocaleString()+' parts\n'+
+    'Backup:  '+sizeBack.toLocaleString()+' parts'+(backup.parts?'':' (was on the bundled default list)')+'\n\n'+
+    'Tip: Restore swaps current ↔ backup, so you can click Restore again to undo this.'
+  )) return;
+
+  // Atomic swap: capture the CURRENT state as the new backup BEFORE applying
+  // the restore, so the user can re-restore if they want to undo this.
+  var beforeRestore;
+  try{
+    var c=localStorage.getItem(CUSTOM_PARTS_KEY);
+    beforeRestore={ ts:Date.now(), parts: c?JSON.parse(c):null };
+  }catch(e){ beforeRestore=null; }
+
+  _applyCatalogState(backup.parts);
+
+  // Now overwrite the backup slot with the pre-restore state.
+  if(beforeRestore){
+    try{
+      localStorage.setItem(CUSTOM_PARTS_BACKUP_KEY, JSON.stringify(beforeRestore));
+      if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('customPartsBackup').set(beforeRestore); }catch(e){} }
+    }catch(e){}
+  }
+  fuseIndex=null;
+  if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
+  if(typeof renderBrowse==='function') renderBrowse();
+  if(typeof toast==='function') toast('✓ Catalog restored to '+when); else alert('✓ Restored');
+}
+
+// Export the currently active catalog as an XLSX file. The format mirrors
+// what the upload flow expects, so this file can be re-imported later for
+// a permanent rollback.
+//
+// Note on round-trip: re-importing an exported file will re-classify
+// departments via classifyDept() (the upload doesn't read the Department
+// column). For perfect-fidelity rollback, use the "Restore Previous"
+// button instead — it preserves every per-part attribute exactly.
+function exportCatalogXlsx(){
+  var parts=(typeof getActiveParts==='function')?getActiveParts():(typeof PARTS!=='undefined'?PARTS:[]);
+  if(!parts.length){ alert('No parts to export.'); return; }
+  var DEPT_NAMES=['Mechanical','Electrical','Datavan','Tools','Hardware','Miscellaneous','Turbine'];
+  var aoa=[['Oracle Item Number','SAGE Item Number','Description','Unit of Measure','Department','Org']];
+  parts.forEach(function(p){
+    aoa.push([
+      p[0],
+      p[1]||'',
+      p[2]||'',
+      p[3]||'Ea',
+      DEPT_NAMES[p[4]]||'',
+      'MASTER'
+    ]);
+  });
+  try{
+    var ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[{wch:18},{wch:18},{wch:55},{wch:10},{wch:14},{wch:10}];
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'MASTER');
+    var d=new Date();
+    var pad=function(n){return ('00'+n).slice(-2);};
+    var stamp=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes());
+    var fname='fleet6_catalog_'+stamp+'_'+parts.length+'parts.xlsx';
+    XLSX.writeFile(wb, fname);
+    if(typeof toast==='function') toast('✓ Exported '+parts.length.toLocaleString()+' parts');
+  }catch(err){
+    alert('Export failed: '+err.message);
+    console.error(err);
+  }
+}
+
+// Pre-upload favorites impact check. Compares a candidate set of Oracle #s
+// (the new XLSX) against every role's current favorites. If any favorite
+// would orphan (i.e. its Oracle # isn't in the new file), prompts the admin
+// with a clear summary before committing. Calls cb(true) to proceed,
+// cb(false) to abort. Reads from Firebase when available so it sees ALL
+// users' favorites across all roles, not just the current session.
+function _checkFavoritesImpact(newOracles, cb){
+  function summarize(rolesData){
+    // rolesData: {role: {favs:{oracle:true}, snaps:{oracle:[...]}}}
+    var orphansByRole={};
+    var totalOrphans=0;
+    Object.keys(rolesData).forEach(function(role){
+      var rd=rolesData[role]||{};
+      var rfavs=rd.favs||{};
+      var rsnaps=rd.snaps||{};
+      var orphans=[];
+      Object.keys(rfavs).forEach(function(o){
+        if(newOracles[o]) return;
+        var snap=rsnaps[o];
+        orphans.push({oracle:o, desc:(snap&&snap[2])?snap[2]:'(no snapshot)'});
+      });
+      if(orphans.length){
+        orphansByRole[role]=orphans;
+        totalOrphans+=orphans.length;
+      }
+    });
+    if(totalOrphans===0){
+      cb(true);
+      return;
+    }
+    // Build the confirmation message. Show up to ~6 examples per role so the
+    // dialog stays readable; the rest get collapsed into a "+X more" count.
+    var lines=['⚠ '+totalOrphans+' favorite'+(totalOrphans===1?'':'s')+' across '+Object.keys(orphansByRole).length+' role'+(Object.keys(orphansByRole).length===1?'':'s')+' use Oracle #s NOT in this file.', ''];
+    Object.keys(orphansByRole).forEach(function(role){
+      var orphans=orphansByRole[role];
+      lines.push(role+' ('+orphans.length+'):');
+      orphans.slice(0,6).forEach(function(o){
+        var d=String(o.desc||'').slice(0,60);
+        lines.push('  • '+o.oracle+' — '+d);
+      });
+      if(orphans.length>6) lines.push('  …and '+(orphans.length-6)+' more');
+      lines.push('');
+    });
+    lines.push('These favorites will stay in users\' lists, marked "NOT IN CATALOG". They\'ll re-attach automatically if a future upload includes them again.');
+    lines.push('');
+    lines.push('Continue with this upload?');
+    cb(window.confirm(lines.join('\n')));
+  }
+
+  // Try Firebase first (all roles); fall back to current session only.
+  if(typeof fbReady!=='undefined' && fbReady && typeof fbDb!=='undefined'){
+    var done=false;
+    var timeout=setTimeout(function(){
+      if(done) return; done=true;
+      // Firebase is configured but slow — fall back to session-only.
+      _checkFavoritesImpactLocal(newOracles, summarize);
+    }, 4000);
+    Promise.all([
+      fbDb.ref('favs').once('value'),
+      fbDb.ref('snaps').once('value')
+    ]).then(function(snaps){
+      if(done) return; done=true; clearTimeout(timeout);
+      var allFavs=snaps[0].val()||{};
+      var allSnaps=snaps[1].val()||{};
+      var rolesData={};
+      Object.keys(allFavs).forEach(function(role){
+        rolesData[role]={favs:allFavs[role]||{}, snaps:(allSnaps[role]||{})};
+      });
+      // Also overlay current session (covers a brand-new user who hasn't synced yet)
+      if(user && user.role){
+        var r=user.role;
+        if(!rolesData[r]) rolesData[r]={favs:{}, snaps:{}};
+        Object.keys(favs||{}).forEach(function(o){rolesData[r].favs[o]=true;});
+        Object.keys(favSnapshots||{}).forEach(function(o){rolesData[r].snaps[o]=favSnapshots[o];});
+      }
+      summarize(rolesData);
+    }).catch(function(err){
+      if(done) return; done=true; clearTimeout(timeout);
+      console.warn('[favs-check] firebase read failed, falling back to local:', err);
+      _checkFavoritesImpactLocal(newOracles, summarize);
+    });
+  } else {
+    _checkFavoritesImpactLocal(newOracles, summarize);
+  }
+}
+
+// Fallback when Firebase is unavailable: only knows about the current
+// session's favorites, so the warning is scoped to "your role".
+function _checkFavoritesImpactLocal(newOracles, summarize){
+  var rolesData={};
+  if(user && user.role){
+    rolesData[user.role]={favs:favs||{}, snaps:favSnapshots||{}};
+  }
+  summarize(rolesData);
 }
 
 // Get the active parts list (custom if set, else default PARTS)
@@ -1966,15 +2635,51 @@ function updateCustomPartsStatus() {
   if(!el) return;
   try {
     var custom = localStorage.getItem(CUSTOM_PARTS_KEY);
+    var statusLine;
     if(custom) {
       var arr = JSON.parse(custom);
-      el.innerHTML = '<span style="color:var(--teal);font-weight:700;">✓ Custom List Active</span> &nbsp;—&nbsp; ' + arr.length.toLocaleString() + ' parts loaded from custom upload/edits.';
+      statusLine = '<span style="color:var(--teal);font-weight:700;">✓ Custom List Active</span> &nbsp;—&nbsp; ' + arr.length.toLocaleString() + ' parts loaded from custom upload/edits.';
       el.style.borderColor = 'rgba(30,180,116,0.3)';
     } else {
-      el.innerHTML = '<span style="color:var(--muted);font-weight:700;">Default List Active</span> &nbsp;—&nbsp; ' + PARTS.length.toLocaleString() + ' parts from original Oracle extract.';
+      statusLine = '<span style="color:var(--muted);font-weight:700;">Default List Active</span> &nbsp;—&nbsp; ' + PARTS.length.toLocaleString() + ' parts from original Oracle extract.';
       el.style.borderColor = 'var(--border)';
     }
+    // Append backup info if a backup exists.
+    var backup = (typeof getCatalogBackup==='function') ? getCatalogBackup() : null;
+    var backupLine = '';
+    if(backup){
+      var when = new Date(backup.ts).toLocaleString();
+      var bsize = backup.parts ? backup.parts.length : (typeof PARTS!=='undefined'?PARTS.length:0);
+      var dsc = backup.parts ? bsize.toLocaleString()+' parts' : 'default list ('+bsize.toLocaleString()+' parts)';
+      backupLine = '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--muted);">↩ Previous version saved — '+dsc+' from '+e(when)+'. Click <strong style="color:#f0a040;">Restore Previous</strong> to roll back.</div>';
+    }
+    // Restore + Export button row.
+    var btnRow = '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
+      '<button onclick="exportCatalogXlsx()" title="Download the current catalog as an .xlsx file" style="background:var(--nav);color:var(--text);border:1px solid var(--border);border-radius:2px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;">💾 Export Catalog</button>'+
+      (backup
+        ? '<button onclick="restoreCatalogBackup()" title="Roll back to the previous catalog state" style="background:rgba(212,150,10,0.12);color:#f0b040;border:1px solid rgba(212,150,10,0.45);border-radius:2px;padding:7px 14px;font-size:11px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;">↩ Restore Previous</button>'
+        : '<button disabled title="No backup available — this appears as soon as you make any catalog change" style="background:transparent;color:var(--muted2);border:1px solid var(--border);border-radius:2px;padding:7px 14px;font-size:11px;font-weight:700;cursor:not-allowed;text-transform:uppercase;letter-spacing:.5px;opacity:.5;">↩ No Backup Yet</button>')+
+      '<a href="javascript:void(0)" onclick="_toggleBackupHelp()" style="font-size:11px;color:var(--muted);text-decoration:underline;text-decoration-style:dotted;margin-left:auto;">ⓘ How does this work?</a>'+
+      '</div>';
+    // Expandable inline explainer — collapsed by default. Spelled out in
+    // plain language so admins know which tool to reach for in the moment
+    // they're deciding between them.
+    var helpPanel = '<div id="backupHelpPanel" style="display:none;margin-top:10px;padding:12px 14px;background:rgba(64,196,196,0.04);border:1px solid rgba(64,196,196,0.25);border-radius:2px;font-size:11px;line-height:1.55;color:var(--text);">'+
+      '<div style="font-weight:700;color:var(--teal);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;font-size:10px;">Export vs Restore — when to use each</div>'+
+      '<div style="margin-bottom:8px;"><strong>💾 Export Catalog</strong> — Downloads an .xlsx file of the current catalog. Use it for <em>long-term backups</em>, sharing with colleagues, or archiving monthly snapshots. The file can be re-imported later, but department classifications will run again (any user-corrected depts may shift).</div>'+
+      '<div style="margin-bottom:8px;"><strong>↩ Restore Previous</strong> — One-click rollback to the catalog state right before your last change. Preserves everything <em>exactly</em> — every part, every dept, every detail. Goes only one step back, so for older versions reach for an exported file.</div>'+
+      '<div style="padding-top:6px;border-top:1px dashed var(--border);color:var(--muted);"><strong>Quick rule:</strong> Restore = instant undo of your last change. Export = save a copy for later.</div>'+
+      '<div style="margin-top:6px;color:var(--muted);"><strong>Automatic:</strong> A backup is taken automatically every time the catalog changes (upload, manual add/edit/delete, reset). You don\'t have to remember.</div>'+
+    '</div>';
+    el.innerHTML = statusLine + backupLine + btnRow + helpPanel;
   } catch(x){ el.textContent = 'Status unknown'; }
+}
+
+// Toggle the inline explainer panel below the Export/Restore buttons.
+function _toggleBackupHelp(){
+  var p=document.getElementById('backupHelpPanel');
+  if(!p) return;
+  p.style.display = (p.style.display==='none' || !p.style.display) ? 'block' : 'none';
 }
 
 // ── DEPARTMENT AUTO-CLASSIFY (mirrors Python logic) ──────────
@@ -1993,74 +2698,482 @@ function classifyDept(desc) {
 }
 
 // ── UPLOAD EXCEL ─────────────────────────────────────────────
+// New flow: parse the file, auto-detect columns, then show a preview modal
+// where the admin can verify/override the mapping and pick an apply mode
+// (merge / replace / add-only / update-only) before any data is written.
 function handleXlsxUpload(input) {
   var file = input.files[0];
   if(!file) return;
   document.getElementById('uploadFileName').textContent = file.name;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      var wb = XLSX.read(e.target.result, {type:'binary'});
-      var ws = wb.Sheets[wb.SheetNames[0]];
-      var data = XLSX.utils.sheet_to_json(ws, {header:1});
+  // Reset the input so picking the same file twice still triggers onchange
+  try{ input.value=''; }catch(e){}
+  _xlsxOpenPreview(file);
+}
 
-      // Find header row (look for ORACLE ITEM NUMBER)
-      var headerRow = -1;
-      var oracleCol=-1, sageCol=-1, descCol=-1, uomCol=-1, orgCol=-1;
-      for(var r=0; r<Math.min(5,data.length); r++) {
-        var row = data[r];
-        for(var c=0; c<row.length; c++) {
-          var cell = String(row[c]||'').toUpperCase().trim();
-          if(cell.indexOf('ORACLE')>=0&&cell.indexOf('ITEM')>=0) oracleCol=c;
-          if(cell.indexOf('SAGE')>=0&&cell.indexOf('ITEM')>=0) sageCol=c;
-          if(cell==='DESCRIPTION'||cell.indexOf('DESCRIPTION')>=0) descCol=c;
-          if(cell.indexOf('UNIT')>=0&&cell.indexOf('MEASURE')>=0) uomCol=c;
-          if(cell.indexOf('ORGAN')>=0||cell==='ORG') orgCol=c;
-        }
-        if(oracleCol>=0&&descCol>=0){ headerRow=r; break; }
-      }
+// Header keyword sets used to score each spreadsheet column against each
+// canonical field. Higher weight = stronger signal. Multiple groups can
+// match a single header; their weights sum.
+var XLSX_COLUMN_KEYWORDS = {
+  oracle: [
+    {match: ['oracle','item'],     weight: 10},
+    {match: ['oracle','number'],   weight: 9},
+    {match: ['oracle'],            weight: 8},
+    {match: ['item','number'],     weight: 7},
+    {match: ['part','number'],     weight: 7},
+    {match: ['material','number'], weight: 7},
+    {match: ['item','code'],       weight: 6},
+    {match: ['item','id'],         weight: 6},
+    {match: ['p','n'],             weight: 6}, // "P/N" tokenizes to ['p','n']
+    {match: ['inventory'],         weight: 4},
+  ],
+  sage: [
+    {match: ['sage','item'],       weight: 10},
+    {match: ['sage','number'],     weight: 9},
+    {match: ['sage'],              weight: 8},
+    {match: ['legacy','item'],     weight: 6},
+    {match: ['old','item'],        weight: 5},
+  ],
+  desc: [
+    {match: ['item','description'],weight: 10},
+    {match: ['part','description'],weight: 10},
+    {match: ['description'],       weight: 9},
+    {match: ['desc'],              weight: 6},
+    {match: ['item','name'],       weight: 5},
+    {match: ['title'],             weight: 3},
+  ],
+  uom: [
+    {match: ['unit','measure'],    weight: 10},
+    {match: ['unit','of','measure'],weight: 10},
+    {match: ['uom'],               weight: 9},
+    {match: ['u','m'],             weight: 8}, // "U/M"
+    {match: ['unit'],              weight: 5},
+    {match: ['measure'],           weight: 4},
+  ],
+  org: [
+    {match: ['organization'],      weight: 10},
+    {match: ['org'],               weight: 9},
+    {match: ['warehouse'],         weight: 7},
+    {match: ['plant'],             weight: 7},
+    {match: ['facility'],          weight: 6},
+    {match: ['location'],          weight: 5},
+  ]
+};
 
-      if(headerRow<0){
-        alert('Could not find required columns (Oracle Item Number, Description) in this file. Please check the format.');
-        return;
-      }
+// Tokenize a header cell into lowercase word-tokens (a-z0-9, splits on
+// any other char). "Oracle Item Number" → ['oracle','item','number'].
+// "P/N" → ['p','n']. "U_of_M" → ['u','of','m'].
+function _xlsxTokenize(s){
+  return String(s||'').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
 
-      var parts = [];
-      var seen = {};
-      for(var i=headerRow+1; i<data.length; i++) {
-        var row = data[i];
-        var oracle = String(row[oracleCol]||'').trim();
-        var desc   = String(row[descCol]||'').trim();
-        if(!oracle||!desc) continue;
-        // Filter to MASTER org if org column exists
-        if(orgCol>=0) {
-          var org = String(row[orgCol]||'').toUpperCase().trim();
-          if(org && org!=='MASTER') continue;
-        }
-        if(seen[oracle]) continue;
-        seen[oracle] = true;
-        var sage = sageCol>=0 ? String(row[sageCol]||'').trim() : '';
-        var uom  = uomCol>=0  ? String(row[uomCol]||'').trim()  : 'Ea';
-        var dept = classifyDept(desc);
-        parts.push([oracle, sage, desc, uom, dept]);
-      }
-
-      if(parts.length===0){
-        alert('No valid parts found in the file. Make sure the file has Oracle Item Number and Description columns with data.');
-        return;
-      }
-
-      _setCustomParts(parts);
-      fuseIndex = null; // Reset fuse index so it rebuilds with new parts
-      alert('✓ Successfully loaded ' + parts.length.toLocaleString() + ' parts from ' + file.name);
-      updateCustomPartsStatus();
-      renderBrowse(); // Refresh the browse list
-    } catch(err) {
-      alert('Error reading file: ' + err.message);
-      console.error(err);
+// Score a tokenized header against one canonical field's keyword groups.
+// Returns the summed weight of all matching groups.
+function _xlsxScoreHeader(tokens, kwGroups){
+  if(!tokens.length) return 0;
+  var tset=Object.create(null);
+  tokens.forEach(function(t){tset[t]=1;});
+  var total=0;
+  for(var i=0;i<kwGroups.length;i++){
+    var g=kwGroups[i];
+    var ok=true;
+    for(var k=0;k<g.match.length;k++){
+      if(!tset[g.match[k]]){ok=false;break;}
     }
+    if(ok) total += g.weight;
+  }
+  return total;
+}
+
+// Find the best header row in a sheet (looks at first 25 rows) and the
+// best column for each canonical field. Returns:
+//   {headerRow, headers:[strings], mapping:{oracle,sage,desc,uom,org},
+//    score: total confidence}
+function _xlsxDetectMapping(rows){
+  var bestRow=-1, bestScore=-1, bestHeaders=null, bestMapping=null;
+  var maxScan=Math.min(25, rows.length);
+  for(var r=0;r<maxScan;r++){
+    var row=rows[r]||[];
+    if(row.length<2) continue;
+    var headers=row.map(function(c){return String(c==null?'':c);});
+    var tokenizedHeaders=headers.map(_xlsxTokenize);
+    var mapping={oracle:-1, sage:-1, desc:-1, uom:-1, org:-1};
+    var rowScore=0;
+    Object.keys(XLSX_COLUMN_KEYWORDS).forEach(function(field){
+      var kw=XLSX_COLUMN_KEYWORDS[field];
+      var bestCol=-1, bestColScore=0;
+      for(var c=0;c<tokenizedHeaders.length;c++){
+        // Don't pick the same column for two different fields
+        var taken=false;
+        Object.keys(mapping).forEach(function(f){if(mapping[f]===c) taken=true;});
+        if(taken) continue;
+        var s=_xlsxScoreHeader(tokenizedHeaders[c], kw);
+        if(s>bestColScore){bestColScore=s; bestCol=c;}
+      }
+      if(bestCol>=0 && bestColScore>=4){
+        mapping[field]=bestCol;
+        rowScore+=bestColScore;
+      }
+    });
+    // Header row must have BOTH oracle and desc detected with reasonable scores
+    if(mapping.oracle<0 || mapping.desc<0) continue;
+    if(rowScore>bestScore){
+      bestScore=rowScore;
+      bestRow=r;
+      bestHeaders=headers;
+      bestMapping=mapping;
+    }
+  }
+  return bestRow>=0
+    ? {headerRow:bestRow, headers:bestHeaders, mapping:bestMapping, score:bestScore}
+    : null;
+}
+
+// Pick the most promising sheet from a workbook by scanning each one's
+// detection score. Returns the sheet name (or first sheet if nothing scores).
+function _xlsxPickBestSheet(wb){
+  var best=null, bestScore=-1;
+  wb.SheetNames.forEach(function(name){
+    try{
+      var rows=XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1});
+      var det=_xlsxDetectMapping(rows);
+      if(det && det.score>bestScore){bestScore=det.score; best=name;}
+    }catch(e){}
+  });
+  return best || wb.SheetNames[0];
+}
+
+// Parse the file and open the preview modal.
+function _xlsxOpenPreview(file){
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    var wb;
+    try{
+      wb=XLSX.read(ev.target.result, {type:'binary'});
+    }catch(err){
+      alert('Could not read this file as XLSX: '+err.message);
+      return;
+    }
+    if(!wb.SheetNames.length){
+      alert('This workbook has no sheets.');
+      return;
+    }
+    var sheetName=_xlsxPickBestSheet(wb);
+    var rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1});
+    var det=_xlsxDetectMapping(rows);
+    _xlsxState={
+      file: file,
+      workbook: wb,
+      sheetName: sheetName,
+      rows: rows,
+      headerRow: det ? det.headerRow : -1,
+      headers: det ? det.headers : (rows[0]||[]).map(function(c){return String(c==null?'':c);}),
+      mapping: det ? det.mapping : {oracle:-1, sage:-1, desc:-1, uom:-1, org:-1},
+      orgValue: '',     // empty = "all rows"; set below if values found
+      orgAllValues: [], // distinct org values found in the sheet
+      mode: 'merge'     // safe default — never removes existing parts
+    };
+    // Pre-pick org value if the column was detected; default to MASTER if present
+    _xlsxRefreshOrgValues();
+    if(_xlsxState.orgAllValues.length){
+      _xlsxState.orgValue = _xlsxState.orgAllValues.indexOf('MASTER')>=0 ? 'MASTER' : _xlsxState.orgAllValues[0];
+    }
+    document.getElementById('xlsxImportSubtitle').textContent=file.name+' — '+wb.SheetNames.length+' sheet'+(wb.SheetNames.length===1?'':'s')+' detected';
+    document.getElementById('mXlsxImport').style.display='flex';
+    _xlsxRender();
   };
+  reader.onerror=function(){alert('Failed to read file.');};
   reader.readAsBinaryString(file);
+}
+
+function _xlsxClosePreview(){
+  document.getElementById('mXlsxImport').style.display='none';
+  _xlsxState=null;
+}
+
+// Re-read the distinct values in the org column based on current state.
+function _xlsxRefreshOrgValues(){
+  var st=_xlsxState; if(!st) return;
+  st.orgAllValues=[];
+  if(st.mapping.org<0 || st.headerRow<0) return;
+  var seen=Object.create(null);
+  for(var i=st.headerRow+1;i<st.rows.length;i++){
+    var row=st.rows[i]||[];
+    var v=String(row[st.mapping.org]||'').trim();
+    if(v && !seen[v]){seen[v]=1; st.orgAllValues.push(v);}
+    if(st.orgAllValues.length>=50) break; // sanity cap
+  }
+}
+
+// Build the parts array from current state (mapping + filter + sheet rows).
+// Returns {parts: [...], skipped: int, dupe: int, total: int}.
+function _xlsxBuildParts(){
+  var st=_xlsxState;
+  var out=[], seen=Object.create(null), skipped=0, dupe=0;
+  if(!st || st.headerRow<0 || st.mapping.oracle<0 || st.mapping.desc<0){
+    return {parts:[], skipped:0, dupe:0, total:0};
+  }
+  for(var i=st.headerRow+1; i<st.rows.length; i++){
+    var row=st.rows[i]||[];
+    var oracle=String(row[st.mapping.oracle]||'').trim();
+    var desc=String(row[st.mapping.desc]||'').trim();
+    if(!oracle||!desc){skipped++; continue;}
+    if(st.mapping.org>=0 && st.orgValue){
+      var orgCell=String(row[st.mapping.org]||'').trim();
+      if(orgCell && orgCell.toUpperCase()!==st.orgValue.toUpperCase()) continue;
+    }
+    if(seen[oracle]){dupe++; continue;}
+    seen[oracle]=true;
+    var sage=st.mapping.sage>=0 ? String(row[st.mapping.sage]||'').trim() : '';
+    var uom =st.mapping.uom>=0  ? String(row[st.mapping.uom] ||'').trim() : 'Ea';
+    var dept=classifyDept(desc);
+    out.push([oracle, sage, desc, uom||'Ea', dept]);
+  }
+  return {parts:out, skipped:skipped, dupe:dupe, total:out.length};
+}
+
+// Plan a merge between the current catalog and an incoming parts list.
+// Modes:
+//   'replace'  — final = newParts (current behavior)
+//   'merge'    — final = current ∪ new; existing rows updated from new
+//   'add'      — final = current + (new - current.oracles); no updates
+//   'update'   — final = current with existing rows refreshed; no adds
+// Returns {parts, added, updated, unchanged, removed}.
+//
+// IMPORTANT: department classification is preserved on existing parts during
+// merge/update — admins or users may have manually corrected a part's dept,
+// and a fresh classifyDept() call would clobber that. Only NEW parts get
+// classified by the heuristic.
+function _xlsxMergePlan(currentParts, newParts, mode){
+  if(mode==='replace'){
+    return {parts: newParts.slice(), added: newParts.length, updated: 0, unchanged: 0, removed: currentParts.length};
+  }
+  var byOracle=Object.create(null);
+  currentParts.forEach(function(p,idx){byOracle[p[0]]={p:p, idx:idx};});
+  var result=currentParts.map(function(p){return p.slice();}); // deep copy of tuples
+  var added=0, updated=0, unchanged=0;
+  var newSeen=Object.create(null);
+  newParts.forEach(function(np){
+    newSeen[np[0]]=true;
+    var hit=byOracle[np[0]];
+    if(hit){
+      if(mode==='add') return; // don't update existing in add-only mode
+      // Update sage/desc/uom from new file; preserve dept (user-classified)
+      var existing=result[hit.idx];
+      var changed=false;
+      if(np[1] && np[1]!==existing[1]){existing[1]=np[1]; changed=true;}
+      if(np[2] && np[2]!==existing[2]){existing[2]=np[2]; changed=true;}
+      if(np[3] && np[3]!==existing[3]){existing[3]=np[3]; changed=true;}
+      if(changed) updated++; else unchanged++;
+    } else {
+      if(mode==='update') return; // don't add new in update-only mode
+      result.push(np.slice());
+      added++;
+    }
+  });
+  // Count things in current but not in new as "kept" (not removed)
+  return {parts: result, added: added, updated: updated, unchanged: unchanged, removed: 0};
+}
+
+function _xlsxRender(){
+  var st=_xlsxState; if(!st) return;
+  var body=document.getElementById('xlsxImportBody');
+  var hr=st.headerRow, hdrs=st.headers||[];
+
+  // ─── Sheet picker ───────────────────────────────────────
+  var sheetOpts=st.workbook.SheetNames.map(function(n){
+    return '<option value="'+e(n)+'"'+(n===st.sheetName?' selected':'')+'>'+e(n)+'</option>';
+  }).join('');
+  var sheetPicker = st.workbook.SheetNames.length>1
+    ? '<div style="margin-bottom:14px;"><label style="display:block;font-size:10px;color:var(--muted2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.8px;">Sheet</label><select id="xlsxSheetSel" onchange="_xlsxOnSheetChange(this.value)" style="width:100%;padding:8px 12px;background:var(--nav);color:var(--text);border:1px solid var(--border);border-radius:2px;font-size:13px;">'+sheetOpts+'</select></div>'
+    : '<div style="margin-bottom:14px;font-size:11px;color:var(--muted);">Sheet: <strong style="color:var(--text);">'+e(st.sheetName)+'</strong></div>';
+
+  // ─── Column dropdowns ───────────────────────────────────
+  function colOpts(selected){
+    var opts='<option value="-1">— not set —</option>';
+    hdrs.forEach(function(h,i){
+      var hint=h?e(h):'(empty)';
+      var letter=_xlsxColLetter(i);
+      opts+='<option value="'+i+'"'+(i===selected?' selected':'')+'>'+letter+' — '+hint+'</option>';
+    });
+    return opts;
+  }
+  function colRow(label, field, required){
+    var sel=st.mapping[field];
+    var status = sel<0 ? (required?'<span style="color:#e07070;font-size:10px;margin-left:8px;">required</span>':'')
+                       : '<span style="color:var(--teal);font-size:10px;margin-left:8px;">✓ detected</span>';
+    return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><div style="width:130px;font-size:11px;color:var(--muted2);text-transform:uppercase;letter-spacing:.5px;">'+label+(required?' *':'')+'</div><select onchange="_xlsxOnColumnChange(\''+field+'\',this.value)" style="flex:1;padding:7px 10px;background:var(--nav);color:var(--text);border:1px solid var(--border);border-radius:2px;font-size:12px;">'+colOpts(sel)+'</select>'+status+'</div>';
+  }
+  var mappingHtml =
+    '<div style="margin-bottom:18px;padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:2px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Column mapping (header row '+(hr>=0?(hr+1):'?')+')</div>'+
+      colRow('Oracle #',    'oracle', true)+
+      colRow('Description', 'desc',   true)+
+      colRow('SAGE #',      'sage',   false)+
+      colRow('UOM',         'uom',    false)+
+      colRow('Org filter',  'org',    false);
+
+  // Org value picker (only if org column is mapped)
+  if(st.mapping.org>=0){
+    _xlsxRefreshOrgValues();
+    var ov=st.orgAllValues.map(function(v){
+      return '<option value="'+e(v)+'"'+(v===st.orgValue?' selected':'')+'>'+e(v)+'</option>';
+    }).join('');
+    mappingHtml +=
+      '<div style="display:flex;align-items:center;gap:10px;margin:10px 0 0 140px;font-size:11px;">'+
+        '<span style="color:var(--muted2);">Only import rows where org =</span>'+
+        '<select onchange="_xlsxOnOrgValueChange(this.value)" style="padding:6px 10px;background:var(--nav);color:var(--text);border:1px solid var(--border);border-radius:2px;font-size:12px;">'+
+          '<option value=""'+(st.orgValue===''?' selected':'')+'>— all rows —</option>'+
+          ov+
+        '</select>'+
+      '</div>';
+  }
+  mappingHtml += '</div>';
+
+  // ─── Preview table ─────────────────────────────────────
+  var build=_xlsxBuildParts();
+  var previewRows=build.parts.slice(0,5);
+  var previewHtml=
+    '<div style="margin-bottom:18px;padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:2px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Preview ('+build.total.toLocaleString()+' parsed'+(build.skipped?', '+build.skipped+' skipped':'')+(build.dupe?', '+build.dupe+' duplicates':'')+')</div>';
+  if(previewRows.length){
+    previewHtml += '<div style="overflow-x:auto;"><table style="width:100%;font-size:11px;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid var(--border);color:var(--muted);text-align:left;">'+
+      '<th style="padding:6px 10px;">Oracle</th><th style="padding:6px 10px;">SAGE</th><th style="padding:6px 10px;">Description</th><th style="padding:6px 10px;">UOM</th></tr></thead><tbody>';
+    previewRows.forEach(function(p){
+      previewHtml += '<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:6px 10px;font-family:monospace;">'+e(p[0])+'</td><td style="padding:6px 10px;font-family:monospace;color:var(--muted);">'+e(p[1])+'</td><td style="padding:6px 10px;">'+e(p[2])+'</td><td style="padding:6px 10px;color:var(--muted);">'+e(p[3])+'</td></tr>';
+    });
+    previewHtml += '</tbody></table></div>';
+  } else {
+    previewHtml += '<div style="font-size:12px;color:#e07070;">No rows would be imported. Check the column mapping above.</div>';
+  }
+  previewHtml += '</div>';
+
+  // ─── Apply mode picker with impact stats ───────────────
+  var currentParts=(typeof getActiveParts==='function')?getActiveParts():(typeof PARTS!=='undefined'?PARTS:[]);
+  function modeRow(mode, label, blurb){
+    var plan=_xlsxMergePlan(currentParts, build.parts, mode);
+    var checked=st.mode===mode ? ' checked' : '';
+    var summary;
+    if(mode==='replace'){
+      summary='Final catalog: '+plan.parts.length.toLocaleString()+' parts (was '+currentParts.length.toLocaleString()+'). '+
+        '<span style="color:#f0b040;">Replaces everything.</span>';
+    } else if(mode==='merge'){
+      summary=plan.added+' new, '+plan.updated+' updated, '+plan.unchanged+' unchanged. Final: '+plan.parts.length.toLocaleString()+' parts.';
+    } else if(mode==='add'){
+      summary=plan.added+' new added. '+(currentParts.length-plan.added>=0?currentParts.length:0)+' existing parts untouched.';
+    } else if(mode==='update'){
+      summary=plan.updated+' existing parts updated. No new parts added.';
+    }
+    return '<label style="display:block;padding:10px 12px;border:1px solid '+(st.mode===mode?'var(--teal)':'var(--border)')+';border-radius:2px;margin-bottom:6px;cursor:pointer;'+(st.mode===mode?'background:rgba(64,196,196,0.06);':'')+'">'+
+      '<div style="display:flex;align-items:flex-start;gap:10px;">'+
+        '<input type="radio" name="xlsxMode" value="'+mode+'"'+checked+' onchange="_xlsxOnModeChange(\''+mode+'\')" style="margin-top:2px;" />'+
+        '<div style="flex:1;">'+
+          '<div style="font-size:12px;font-weight:700;color:var(--text);">'+label+'</div>'+
+          '<div style="font-size:11px;color:var(--muted);margin-top:2px;">'+blurb+'</div>'+
+          '<div style="font-size:11px;color:var(--muted2);margin-top:6px;">'+summary+'</div>'+
+        '</div>'+
+      '</div>'+
+    '</label>';
+  }
+  var modeHtml=
+    '<div style="margin-bottom:14px;padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:2px;">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Apply mode</div>'+
+      modeRow('merge',   'Merge (recommended)',  'Add new parts, update existing ones. Nothing is removed. Safe for partial/addition files.')+
+      modeRow('add',     'Add only',             'Only add Oracle #s not already in the catalog. Existing parts are left exactly as they are.')+
+      modeRow('update',  'Update only',          'Refresh SAGE / description / UOM for existing parts. Skip rows whose Oracle # isn\'t already in the catalog.')+
+      modeRow('replace', 'Replace catalog',      'Wipe the current catalog and install only what\'s in this file. May orphan favorites — you\'ll see a list before applying.')+
+      '<div style="margin-top:10px;padding:8px 10px;background:rgba(64,196,196,0.06);border:1px solid rgba(64,196,196,0.25);border-radius:2px;font-size:11px;color:var(--muted);line-height:1.5;">'+
+        '<strong style="color:var(--teal);">✓ Safety net:</strong> Before this import is applied, the current catalog is automatically saved as a backup. '+
+        'If the result looks wrong, just close this dialog and click <strong>↩ Restore Previous</strong> on the admin page to roll back instantly.'+
+      '</div>'+
+    '</div>';
+
+  // Disable Apply if mapping is incomplete or no parts would import
+  var canApply = st.mapping.oracle>=0 && st.mapping.desc>=0 && build.parts.length>0;
+  var btn=document.getElementById('xlsxApplyBtn');
+  if(btn){
+    btn.disabled = !canApply;
+    btn.style.opacity = canApply ? '1' : '0.4';
+    btn.style.cursor = canApply ? 'pointer' : 'not-allowed';
+  }
+
+  body.innerHTML = sheetPicker + mappingHtml + previewHtml + modeHtml;
+}
+
+// Convert column index to A/B/C... AA/AB style spreadsheet letter.
+function _xlsxColLetter(n){
+  var s=''; n=n|0;
+  while(n>=0){s=String.fromCharCode(65+(n%26))+s; n=Math.floor(n/26)-1;}
+  return s;
+}
+
+// ─── Modal handlers ──────────────────────────────────────
+function _xlsxOnSheetChange(name){
+  var st=_xlsxState; if(!st) return;
+  st.sheetName=name;
+  st.rows=XLSX.utils.sheet_to_json(st.workbook.Sheets[name],{header:1});
+  var det=_xlsxDetectMapping(st.rows);
+  st.headerRow = det ? det.headerRow : -1;
+  st.headers   = det ? det.headers   : (st.rows[0]||[]).map(function(c){return String(c==null?'':c);});
+  st.mapping   = det ? det.mapping   : {oracle:-1,sage:-1,desc:-1,uom:-1,org:-1};
+  _xlsxRefreshOrgValues();
+  st.orgValue = (st.orgAllValues.indexOf('MASTER')>=0) ? 'MASTER' : (st.orgAllValues[0]||'');
+  _xlsxRender();
+}
+function _xlsxOnColumnChange(field, val){
+  var st=_xlsxState; if(!st) return;
+  var v=parseInt(val,10);
+  st.mapping[field] = isNaN(v) ? -1 : v;
+  // If org just became unmapped, clear filter value
+  if(field==='org' && st.mapping.org<0) st.orgValue='';
+  _xlsxRefreshOrgValues();
+  if(field==='org' && st.orgAllValues.indexOf(st.orgValue)<0){
+    st.orgValue = (st.orgAllValues.indexOf('MASTER')>=0) ? 'MASTER' : (st.orgAllValues[0]||'');
+  }
+  _xlsxRender();
+}
+function _xlsxOnOrgValueChange(val){
+  var st=_xlsxState; if(!st) return;
+  st.orgValue = val;
+  _xlsxRender();
+}
+function _xlsxOnModeChange(mode){
+  var st=_xlsxState; if(!st) return;
+  st.mode=mode;
+  _xlsxRender();
+}
+
+// Final commit. For 'replace' we still run the favorites-impact check
+// (since that's the only mode that can orphan favorites). Other modes
+// never remove anything, so they're guaranteed safe for favorites.
+function _xlsxApply(){
+  var st=_xlsxState; if(!st) return;
+  var build=_xlsxBuildParts();
+  if(!build.parts.length){alert('Nothing to import — check column mapping.'); return;}
+  var currentParts=(typeof getActiveParts==='function')?getActiveParts():(typeof PARTS!=='undefined'?PARTS:[]);
+  var plan=_xlsxMergePlan(currentParts, build.parts, st.mode);
+  function commit(){
+    _setCustomParts(plan.parts);
+    fuseIndex=null;
+    var msg;
+    if(st.mode==='replace')      msg='✓ Replaced catalog with '+plan.parts.length.toLocaleString()+' parts';
+    else if(st.mode==='merge')   msg='✓ Merged: +'+plan.added+' new, ~'+plan.updated+' updated';
+    else if(st.mode==='add')     msg='✓ Added '+plan.added+' new parts';
+    else if(st.mode==='update')  msg='✓ Updated '+plan.updated+' existing parts';
+    if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
+    if(typeof renderBrowse==='function') renderBrowse();
+    _xlsxClosePreview();
+    if(typeof toast==='function') toast(msg); else alert(msg);
+  }
+  if(st.mode==='replace'){
+    var newOracles=Object.create(null);
+    plan.parts.forEach(function(p){newOracles[p[0]]=true;});
+    _checkFavoritesImpact(newOracles, function(proceed){
+      if(proceed) commit();
+    });
+  } else {
+    // Merge / add / update — never remove anything, so favorites are always safe.
+    commit();
+  }
 }
 
 // ── MANUAL ADD ───────────────────────────────────────────────
@@ -2179,22 +3292,41 @@ function _origRenderBrowse_patched() {
   var q=(document.getElementById('bQ').value||'').trim();
   var dept=document.getElementById('bDept').value;
   var activeParts = getActiveParts();
+  var meta=null;
   if(!q){
     bFil=activeParts.filter(function(p){return dept===''||p[4]==dept;}).map(function(p){return{part:p};});
   } else {
     if(!fuseIndex) fuseIndex=buildFuse(activeParts);
     var raw=smartSearch(q,activeParts,fuseIndex);
+    meta={corrections: raw._corrections||[], wasFuzzy: !!raw._wasFuzzy};
     bFil=raw.map(function(r){return{part:activeParts[r.item.i]};}).filter(function(r){return dept===''||r.part[4]==dept;});
   }
-  var tot=bFil.length,s=bPg*PG,en=Math.min(s+PG,tot);
-  document.getElementById('bCount').textContent='Showing '+(s+1).toLocaleString()+' – '+en.toLocaleString()+' of '+tot.toLocaleString()+' parts';
+  var tot=bFil.length, s=bPg*PG, en=Math.min(s+PG,tot);
+  var labelHtml;
+  if(!q){
+    labelHtml='Showing '+(s+1).toLocaleString()+' – '+en.toLocaleString()+' of '+tot.toLocaleString()+' parts';
+  } else if(tot===0){
+    labelHtml='No matches for "<strong>'+e(q)+'</strong>"';
+  } else {
+    var prefix = meta.wasFuzzy ? '~' : '';
+    labelHtml = prefix + tot.toLocaleString()+' result'+(tot===1?'':'s')+' for "<strong style="color:var(--teal)">'+e(q)+'</strong>"';
+    if(meta.corrections && meta.corrections.length){
+      var fixes=meta.corrections.map(function(c){
+        return '<em>'+e(c.from)+'</em> → <strong style="color:var(--teal)">'+e(c.to)+'</strong>';
+      }).join(', ');
+      labelHtml += ' &nbsp;·&nbsp; Did you mean: '+fixes;
+    } else if(meta.wasFuzzy){
+      labelHtml += ' &nbsp;·&nbsp; <span style="opacity:.7">fuzzy match</span>';
+    }
+  }
+  document.getElementById('bCount').innerHTML=labelHtml;
   document.getElementById('bList').innerHTML=bFil.slice(s,en).map(function(r){return pCard(r.part,q);}).join('');
   renderPag(Math.ceil(tot/PG));
 }
 
 // ── FAVORITES COLORS ─────────────────────────────────────────
 var FAV_COLORS = [
-  {k:'none',   label:'No color', bg:'var(--card)',                  border:'var(--border)',         text:'var(--text)'},
+  {k:'none',   label:'Default',  bg:'var(--card)',                  border:'var(--border)',         text:'var(--text)'},
   {k:'red',    label:'Red',      bg:'rgba(220,50,50,0.13)',         border:'rgba(220,50,50,0.45)',  text:'#f08080'},
   {k:'orange', label:'Orange',   bg:'rgba(212,110,10,0.13)',        border:'rgba(212,110,10,0.45)', text:'#f0a840'},
   {k:'yellow', label:'Yellow',   bg:'rgba(210,200,0,0.13)',         border:'rgba(210,200,0,0.40)',  text:'#e0d040'},
@@ -2250,6 +3382,13 @@ function onGroup(el){
   if(!v) delete favGroups[ck];
   else favGroups[ck] = v;
   save();
+  // Live-update every color dropdown option for this color key so the
+  // renamed label shows immediately without disturbing the input being typed in
+  var defLbl = (FAV_COLORS.find(function(c){return c.k===ck;})||{}).label || ck;
+  var newText = v || defLbl;
+  document.querySelectorAll('.fav-color-select option[value="'+ck+'"]').forEach(function(opt){
+    opt.textContent = newText;
+  });
 }
 
 function favCard(p){
@@ -2262,16 +3401,30 @@ function favCard(p){
   var DI_=['🔧','⚡','💻','🔨','🔩','📦','🌀'];
   var qval = order[oracle] || 1;
   var currentColor = favColors[oracle] || 'none';
+  var isOrphan = !!p._orphan;
 
-  // Color dropdown options
+  // Color dropdown options — show user's custom group name if they renamed it
   var opts = FAV_COLORS.map(function(c){
-    return `<option value="${c.k}"${c.k===currentColor?' selected':''}>${c.label}</option>`;
+    var custom = (c.k !== 'none' && favGroups[c.k]) ? String(favGroups[c.k]).trim() : '';
+    var lbl = custom ? e(custom) : c.label;
+    return `<option value="${c.k}"${c.k===currentColor?' selected':''}>${lbl}</option>`;
   }).join('');
 
   var origSafe = p[2].replace(/"/g,'&quot;');
   var displaySafe = displayText.replace(/"/g,'&quot;');
 
-  return `<div class="fav-card" style="background:${cd.bg};border-left-color:${cd.border};border-color:${cd.border};">
+  // Orphan styling: faded background + amber border + warning chip in the meta row.
+  // Orphans keep all their per-user customization (color, nickname, group), they
+  // just can't render from a live catalog entry — the data comes from a snapshot
+  // captured when the part was originally favorited.
+  var orphanCardStyle = isOrphan
+    ? 'background:rgba(212,150,10,0.08);border-left-color:rgba(212,150,10,0.55);border-color:rgba(212,150,10,0.35);opacity:0.85;'
+    : 'background:'+cd.bg+';border-left-color:'+cd.border+';border-color:'+cd.border+';';
+  var orphanChip = isOrphan
+    ? '<span title="This Oracle # is not in the current parts catalog. The card is rendered from a snapshot taken when you favorited it. Un-star to remove, or wait for a future XLSX upload that includes this part." style="background:rgba(212,150,10,0.18);color:#f0b040;border:1px solid rgba(212,150,10,0.5);padding:1px 6px;border-radius:2px;font-size:10px;letter-spacing:.5px;">⚠ NOT IN CATALOG</span>'
+    : '';
+
+  return `<div class="fav-card" style="${orphanCardStyle}">
     <div class="fav-card-inner">
       <select class="fav-color-select" data-oracle="${oracle}" onchange="onColorChange(this)" title="Row color" style="color:${cd.text};">
         ${opts}
@@ -2288,7 +3441,7 @@ function favCard(p){
             <option value="4"${p[4]==4?' selected':''}>🔩 Hardware</option>
             <option value="5"${p[4]==5?' selected':''}>📦 Miscellaneous</option>
           </select>
-          <span>Oracle: ${p[0]}</span><span>SAGE: ${p[1]}</span><span>UOM: ${p[3]}</span>
+          <span>Oracle: ${p[0]}</span><span>SAGE: ${p[1]}</span><span>UOM: ${p[3]}</span>${orphanChip}
         </div>
       </div>
       <button class="fb" onclick="togF('${oracle}',this)" style="font-size:16px;flex-shrink:0;">⭐</button>
