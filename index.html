@@ -461,6 +461,17 @@ input,select{outline:none;font-family:inherit;}
   #eventLogBody td:first-child{font-size:13px !important;margin-bottom:5px !important;}
   /* row 2: part description (main content) */
   #eventLogBody td:nth-child(2){font-size:13px !important;color:#e8e8e8 !important;margin-bottom:6px !important;}
+  /* Oracle # pill — promote to its own line above the description on mobile so it
+     doesn't get lost inline with long descriptions. Also bumped a touch larger. */
+  #eventLogBody .el-oracle{
+    display:block !important;
+    width:fit-content !important;
+    max-width:100% !important;
+    font-size:12px !important;
+    padding:3px 8px !important;
+    margin:0 0 6px 0 !important;
+    word-break:break-all !important;
+  }
   /* row 3: who + role inline */
   #eventLogBody td:nth-child(3){font-size:11px !important;display:inline-block !important;margin-right:10px !important;}
   /* row 4: timestamp inline next to who */
@@ -2290,8 +2301,8 @@ function refreshEventLog() {
     // so every row still has a visible Oracle # slot.
     var oracle = _resolveOracle(ev);
     var oraclePill = oracle
-      ? '<span style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;font-weight:700;color:#1eb474;background:rgba(30,180,116,0.10);border:1px solid rgba(30,180,116,0.28);border-radius:2px;padding:1px 6px;margin-right:8px;letter-spacing:.3px;">' + _esc(oracle) + '</span>'
-      : '<span title="Oracle # not recorded for this entry" style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;font-weight:700;color:#666;background:rgba(255,255,255,0.04);border:1px dashed #444;border-radius:2px;padding:1px 6px;margin-right:8px;letter-spacing:.3px;">—</span>';
+      ? '<span class="el-oracle" style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;font-weight:700;color:#1eb474;background:rgba(30,180,116,0.10);border:1px solid rgba(30,180,116,0.28);border-radius:2px;padding:1px 6px;margin-right:8px;letter-spacing:.3px;">' + _esc(oracle) + '</span>'
+      : '<span class="el-oracle el-oracle-missing" title="Oracle # not recorded for this entry" style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;font-weight:700;color:#666;background:rgba(255,255,255,0.04);border:1px dashed #444;border-radius:2px;padding:1px 6px;margin-right:8px;letter-spacing:.3px;">—</span>';
     rows += '<tr style="border-bottom:1px solid #2a2a2a;">';
     rows += '<td style="padding:10px 14px;white-space:nowrap;font-size:12px;font-weight:700;color:' + color + ';vertical-align:top;">' + label + qty + '</td>';
     rows += '<td style="padding:10px 14px;font-size:12px;color:#e0e0e0;vertical-align:top;max-width:400px;word-break:break-word;">' + oraclePill + _esc(ev.p) + '</td>';
