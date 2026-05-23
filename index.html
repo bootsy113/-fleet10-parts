@@ -196,6 +196,40 @@ input,select{outline:none;font-family:inherit;}
 .ometa{font-size:11px;color:var(--muted);}
 .rm{background:transparent;color:var(--danger);border:1px solid rgba(217,95,95,.25);border-radius:2px;padding:6px 10px;font-size:12px;font-weight:700;transition:all .15s;}
 .rm:hover{background:rgba(217,95,95,.12);}
+/* Status badges — pending vs submitted on each order item */
+.stbadge{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:2px;margin-right:6px;vertical-align:1px;white-space:nowrap;}
+.stbadge-pend{color:#d4890a;background:rgba(212,137,10,.10);border:1px solid rgba(212,137,10,.35);}
+.stbadge-sub{color:#1eb474;background:rgba(30,180,116,.10);border:1px solid rgba(30,180,116,.4);}
+.ord-submitted{border-left:3px solid #1eb474;}
+.ord-pending{border-left:3px solid #d4890a;}
+/* Admin "Pull" / per-row mark button */
+.pullb{background:var(--teal);color:#fff;border-radius:2px;padding:6px 12px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;transition:all .12s;border:none;cursor:pointer;}
+.pullb:hover{background:var(--teal-d);}
+.pullb-done{background:transparent;color:#1eb474;border:1px solid rgba(30,180,116,.4);}
+.pullb-done:hover{background:rgba(30,180,116,.08);}
+
+/* ── UPDATE BANNER ── */
+.upd-banner{display:none;align-items:center;gap:12px;background:linear-gradient(90deg,rgba(30,180,116,.14),rgba(47,140,202,.14));border-top:1px solid rgba(30,180,116,.35);border-bottom:1px solid rgba(30,180,116,.35);padding:0;overflow:hidden;position:relative;}
+.upd-banner.show{display:flex;}
+.upd-tag{flex-shrink:0;background:var(--teal);color:#fff;font-size:10px;font-weight:800;letter-spacing:1.2px;padding:8px 14px;text-transform:uppercase;}
+.upd-scroll{flex:1;overflow:hidden;position:relative;height:36px;}
+.upd-track{display:inline-flex;gap:60px;white-space:nowrap;position:absolute;left:100%;top:50%;transform:translateY(-50%);animation:upd-marquee 38s linear infinite;will-change:transform;}
+.upd-track:hover{animation-play-state:paused;}
+.upd-msg{font-size:13px;color:var(--text);font-weight:500;display:inline-flex;align-items:center;gap:8px;}
+.upd-msg strong{color:var(--teal);font-weight:800;}
+.upd-msg .upd-em{color:#d4890a;font-weight:700;}
+.upd-close{flex-shrink:0;background:transparent;border:none;color:var(--muted);font-size:18px;font-weight:700;padding:0 14px;cursor:pointer;height:36px;line-height:36px;transition:color .15s;}
+.upd-close:hover{color:var(--text);}
+@keyframes upd-marquee{
+  0%{transform:translate(0,-50%);}
+  100%{transform:translate(-100%,-50%);}
+}
+@media(max-width:620px){
+  .upd-tag{font-size:9px;padding:6px 10px;letter-spacing:.6px;}
+  .upd-msg{font-size:11px;}
+  .upd-scroll{height:30px;}
+  .upd-close{height:30px;line-height:30px;font-size:16px;padding:0 10px;}
+}
 
 /* ── BUTTONS ── */
 .btn-primary{background:var(--teal);color:#fff;border-radius:2px;padding:9px 20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;transition:all .15s;}
@@ -557,6 +591,15 @@ input,select{outline:none;font-family:inherit;}
     </div>
   </div>
 
+  <!-- UPDATE BANNER (shown after login, dismissible per user + per banner version) -->
+  <div class="upd-banner" id="updBanner" role="status" aria-live="polite">
+    <span class="upd-tag">📣 What's New</span>
+    <div class="upd-scroll">
+      <div class="upd-track" id="updTrack"></div>
+    </div>
+    <button class="upd-close" onclick="dismissUpdateBanner()" title="Dismiss this notice" aria-label="Dismiss">✕</button>
+  </div>
+
   <div class="content">
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('order')" data-tab="order"><span class="ticon">🛒</span>My Order<span class="tbadge" id="oBadge">0</span></button>
@@ -631,14 +674,19 @@ input,select{outline:none;font-family:inherit;}
     <div class="tab-content" id="tab-admin">
       <div class="acard">
         <h3>🔐 Administrative Controls</h3>
-        <div class="warnbox">⚠️ Weekly reset zeros all quantities except items marked "Keep". The current order is saved to history automatically before any reset is performed.</div>
-        <div class="sec-hd">
-          <div class="sec-t">Items to Carry Over</div>
-          <button class="btn-danger" onclick="openReset()">🗑️ Reset Weekly Order</button>
+        <div class="warnbox">
+          ℹ️ <strong>How the weekly cycle works:</strong> Click <strong>📤 Pull</strong> on a part after you've physically pulled / ordered it — it stays visible to users (marked <em>Submitted</em>) so they know it was received. Every <strong>Monday at 8:00 AM</strong> the app automatically snapshots the full week to history, removes submitted items, and carries pending items forward. Use <strong>Clear Last Week's Pending</strong> below to drop carried-over items the team no longer needs.
+        </div>
+        <div id="adminStatusBar" style="margin-bottom:12px;padding:10px 12px;background:var(--nav);border:1px solid var(--border);border-radius:2px;"></div>
+        <div class="sec-hd" style="flex-wrap:wrap;gap:8px;">
+          <div class="sec-t">Current Week's Order</div>
+          <button class="btn-primary" onclick="pullAllPending()" style="background:var(--teal);">📤 Pull All Pending</button>
+          <button class="btn-ghost" onclick="clearLastWeekPending()" title="Removes only pending items left over from before the last Monday-8am reset">🧹 Clear Last Week's Pending</button>
+          <button class="btn-danger" onclick="openReset()" title="Force a weekly snapshot now instead of waiting for Monday 8am">🗑️ Force Weekly Reset Now</button>
           <button class="btn-primary" onclick="openEventLog()" style="background:#2f8cca;border:none;">📝 View Event Log</button>
           <button class="help-btn" onclick="openHelp('admin')" title="What does Admin do?" aria-label="Help">?</button>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Check items to preserve after the weekly reset:</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Pull items as you fill them. Check <strong>Keep</strong> to preserve an item across the weekly reset regardless of status.</div>
         <div id="kList"></div>
       </div>
 
@@ -742,10 +790,11 @@ input,select{outline:none;font-family:inherit;}
 <!-- MODALS -->
 <div class="mov" id="mRes">
   <div class="modal">
-    <h3>⚠️ Confirm Weekly Reset</h3>
-    <p>All quantities zeroed except kept items. Current order saved to history first.</p>
+    <h3>⚠️ Force Weekly Reset</h3>
+    <p style="font-size:13px;color:var(--muted);line-height:1.55;">Snapshots the entire current week to history (with submitted/pending status preserved), then removes <strong>submitted</strong> items. <strong>Pending</strong> items carry forward into the new week. Items marked <em>Keep</em> stay regardless.</p>
+    <p style="font-size:11px;color:var(--muted2);">This happens automatically every Monday at 8am — use this only if you need to start a new week early.</p>
     <div class="msum" id="resSum"></div>
-    <div class="mbtns"><button class="btn-ghost" onclick="closeMod()">Cancel</button><button class="btn-danger" onclick="confReset()">Reset Order</button></div>
+    <div class="mbtns"><button class="btn-ghost" onclick="closeMod()">Cancel</button><button class="btn-danger" onclick="confReset()">Snapshot &amp; Start New Week</button></div>
   </div>
 </div>
 
@@ -1248,7 +1297,19 @@ let bFil=[], bPg=0, bTmr=null;
 let fTmr=null;                 // debounce handle for favorites search
 let _favFuse=null, _favFuseKey=''; // cached Fuse for favorites pool
 const PG=50;
-const SK={o:'f6_ord',k:'f6_kp',h:'f6_hi',b:'f6_ob'};
+// Storage keys. New (2026-05): s=item status (pending/submitted), a=added-at ms,
+// lr=lastReset ms (timestamp of most recent Monday-8am snapshot).
+const SK={o:'f6_ord',k:'f6_kp',h:'f6_hi',b:'f6_ob',s:'f6_os',a:'f6_oa',lr:'f6_lr'};
+// Parallel maps that travel alongside `order`. orderStatus keeps the
+// pending/submitted state per oracle. orderAdded keeps the ms timestamp the
+// item was last touched (added or incremented) — used by "Clear last week's
+// pending" to identify items carried over from before the most recent reset.
+var orderStatus={}, orderAdded={};
+// Last weekly-reset timestamp in ms (Monday 08:00 local). 0 = never reset.
+var lastReset=0;
+// Resolves a status, falling back to 'pending' for any legacy item that
+// existed before the status field was introduced.
+function stat(oracle){ return (orderStatus && orderStatus[oracle]) || 'pending'; }
 var favNicks={};  // {oracle: nickname} per role
 var favColors={}; // {oracle: colorKey} per role
 var favGroups={}; // {colorKey: groupName} per role
@@ -1349,6 +1410,27 @@ function fbInit(){
       var v = snap.val() || {};
       keep = v;
       try{ localStorage.setItem(SK.k, JSON.stringify(v)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('orderStatus').on('value', function(snap){
+      var v = snap.val() || {};
+      orderStatus = v;
+      // Backfill any active items that don't have a status yet
+      Object.keys(order||{}).forEach(function(o){ if(!(o in orderStatus)) orderStatus[o]='pending'; });
+      try{ localStorage.setItem(SK.s, JSON.stringify(orderStatus)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('orderAdded').on('value', function(snap){
+      var v = snap.val() || {};
+      orderAdded = v;
+      Object.keys(order||{}).forEach(function(o){ if(!(o in orderAdded)) orderAdded[o]=lastReset||0; });
+      try{ localStorage.setItem(SK.a, JSON.stringify(orderAdded)); }catch(e){}
+      _rerender();
+    });
+    fbDb.ref('lastReset').on('value', function(snap){
+      var v = snap.val();
+      lastReset = (typeof v==='number' && v>0) ? v : 0;
+      try{ localStorage.setItem(SK.lr, String(lastReset)); }catch(e){}
       _rerender();
     });
     fbDb.ref('hist').on('value', function(snap){
@@ -1464,6 +1546,9 @@ function _fbFlush(){
     fbDb.ref('order').set(order || {});
     fbDb.ref('orderBy').set(orderBy || {});
     fbDb.ref('keep').set(keep || {});
+    fbDb.ref('orderStatus').set(orderStatus || {});
+    fbDb.ref('orderAdded').set(orderAdded || {});
+    fbDb.ref('lastReset').set(lastReset || 0);
     fbDb.ref('hist').set(hist || []);
     var role = user.role;
     fbDb.ref('favs/'+role).set(favs || {});
@@ -1480,6 +1565,9 @@ function save(){
     localStorage.setItem(SK.o,JSON.stringify(order));
     localStorage.setItem(SK.b,JSON.stringify(orderBy));
     localStorage.setItem(SK.k,JSON.stringify(keep));
+    localStorage.setItem(SK.s,JSON.stringify(orderStatus));
+    localStorage.setItem(SK.a,JSON.stringify(orderAdded));
+    localStorage.setItem(SK.lr,String(lastReset||0));
     localStorage.setItem(favsKey(),JSON.stringify(favs));
     localStorage.setItem(nickKey(),JSON.stringify(favNicks));
     localStorage.setItem(colorKey(),JSON.stringify(favColors));
@@ -1497,6 +1585,9 @@ function load(){
     order=JSON.parse(localStorage.getItem(SK.o)||'{}');
     orderBy=JSON.parse(localStorage.getItem(SK.b)||'{}');
     keep=JSON.parse(localStorage.getItem(SK.k)||'{}');
+    orderStatus=JSON.parse(localStorage.getItem(SK.s)||'{}');
+    orderAdded=JSON.parse(localStorage.getItem(SK.a)||'{}');
+    lastReset=parseInt(localStorage.getItem(SK.lr)||'0',10)||0;
     favs=JSON.parse(localStorage.getItem(favsKey())||'{}');
     favNicks=JSON.parse(localStorage.getItem(nickKey())||'{}');
     favColors=JSON.parse(localStorage.getItem(colorKey())||'{}');
@@ -1505,7 +1596,14 @@ function load(){
     hist=JSON.parse(localStorage.getItem(SK.h)||'[]');
     deptOverrides=JSON.parse(localStorage.getItem('f6_dept_overrides')||'{}');
     uomOverrides=JSON.parse(localStorage.getItem('f6_uom_overrides')||'{}');
-  }catch(e){order={};orderBy={};keep={};favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};uomOverrides={};}
+  }catch(e){order={};orderBy={};keep={};orderStatus={};orderAdded={};lastReset=0;favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};uomOverrides={};}
+  // Backfill: any existing order item missing a status/addedAt becomes
+  // pending and is dated to the last reset (so it's treated as "from last
+  // week" and the admin can clear it explicitly if needed).
+  Object.keys(order||{}).forEach(function(o){
+    if(!(o in orderStatus)) orderStatus[o]='pending';
+    if(!(o in orderAdded))  orderAdded[o]=lastReset||0;
+  });
 }
 
 // ── LOGIN ───────────────────────────────────────────────────
@@ -1561,6 +1659,12 @@ function doLogin(){
   load();
   fbInit();                  // initialize Firebase (no-op after first time)
   fbAttachRoleListeners();   // listen for changes to this role's favorites/nicks/colors/groups
+  // Auto weekly reset (Monday 8am local). Delayed so Firebase has a chance to
+  // push us the latest `lastReset` first — avoids triggering a duplicate
+  // snapshot if another session already did the reset.
+  setTimeout(function(){ try{ maybeAutoReset(); }catch(e){ console.error('autoReset',e); } }, 1500);
+  // Update banner — shown once per dismissal-version per user.
+  setTimeout(function(){ try{ showUpdateBanner(); }catch(e){ console.error('banner',e); } }, 600);
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('hName').textContent=name;
@@ -1590,6 +1694,8 @@ function logout(){
     roleListeners.forEach(function(unsub){ try{ unsub(); }catch(e){} });
     roleListeners = [];
   }
+  // Hide the update banner so it doesn't flash on the login screen
+  var _b=document.getElementById('updBanner'); if(_b) _b.classList.remove('show');
   user=null;selR=null;
   document.querySelectorAll('.role-btn,.role-btn-wide').forEach(b=>b.classList.remove('sel','sel-adm'));
   document.getElementById('userName').value='';
@@ -1641,6 +1747,20 @@ function gp(o){
 function e(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // ── ORDER ACTIONS ────────────────────────────────────────────
+// Helper: a brand-new add or a qty bump always re-marks an item as
+// 'pending' — the admin needs to know there's something new to pull. Also
+// refreshes addedAt so "Clear last week pending" leaves it alone.
+function _markPending(oracle){
+  orderStatus[oracle]='pending';
+  orderAdded[oracle]=Date.now();
+}
+function _forgetItem(oracle){
+  delete order[oracle];
+  delete orderBy[oracle];
+  delete orderStatus[oracle];
+  delete orderAdded[oracle];
+  delete keep[oracle];
+}
 function addP(oracle,qty){
   if(!qty||qty<1)qty=1;
   order[oracle]=(order[oracle]||0)+qty;
@@ -1649,6 +1769,7 @@ function addP(oracle,qty){
     var ri=['Mechanical','Electrical','Datavan','Turbine'].indexOf(user.role);
     if(ri>=0) orderBy[oracle]=ri;
   }
+  _markPending(oracle);
   save();badges();renderOrder();toast('Added to order');
   const p=gp(oracle);
   console.log('[EWS] addP called, user:', user, 'oracle:', oracle);
@@ -1657,21 +1778,30 @@ function addP(oracle,qty){
 function setQ(oracle,v){
   const prev=order[oracle]||0;
   const n=parseInt(v)||0;
-  if(n<=0){delete order[oracle];delete orderBy[oracle];}else order[oracle]=n;
+  if(n<=0){_forgetItem(oracle);}
+  else{
+    order[oracle]=n;
+    // Qty increase: treat as fresh activity (back to pending). Qty decrease
+    // doesn't disturb status — the part was already pulled or already pending.
+    if(n>prev) _markPending(oracle);
+  }
   save();badges();
 
 }
 function adjQ(oracle,d){
   const prev=order[oracle]||0;
   const n=prev+d;
-  if(n<=0){delete order[oracle];delete orderBy[oracle];}else order[oracle]=n;
+  if(n<=0){_forgetItem(oracle);}
+  else{
+    order[oracle]=n;
+    if(d>0) _markPending(oracle);
+  }
   save();badges();renderOrder();
   if(n<=0){var pd=gp(oracle);if(user)writeLog('REMOVE',oracle,pd?pd[2]:'Oracle #'+oracle,'',user.name,user.role);}
 }
 function rmP(oracle){
   const p=gp(oracle);
-  delete order[oracle];
-  delete orderBy[oracle];
+  _forgetItem(oracle);
   save();badges();renderOrder();toast('Removed');
   if(user) writeLog('REMOVE', oracle, p?p[2]:'Oracle #'+oracle, '', user.name, user.role);
 }
@@ -1752,10 +1882,14 @@ function renderOrder(){
   }
   document.getElementById('oList').innerHTML=fil.map(([oracle,qty])=>{
     const p=gp(oracle);if(!p)return'';
-    return`<div class="ord-item">
+    const st=stat(oracle);
+    const badge=st==='submitted'
+      ? `<span class="stbadge stbadge-sub" title="Pulled by admin — counted on this week's order, will move to history on Monday at 8am">✓ Submitted</span>`
+      : `<span class="stbadge stbadge-pend" title="Waiting for admin to pull">● Pending</span>`;
+    return`<div class="ord-item ord-${st}">
       <div class="odot" style="background:${DC[p[4]]}"></div>
       <div class="oinfo">
-        <div class="odesc">${e(p[2])}</div>
+        <div class="odesc">${badge} ${e(p[2])}</div>
         <div class="ometa">${DI[p[4]]} ${DN[p[4]]} &nbsp;·&nbsp; Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; UOM: ${p[3]}</div>
       </div>
       <div class="qwrap">
@@ -2093,22 +2227,38 @@ function goP(p){bPg=Math.max(0,p);renderBrowse();window.scrollTo(0,0);}
 
 // ── HISTORY ──────────────────────────────────────────────────
 function renderHistory(){
-  // Only show pre-reset snapshots
-  const resets=hist.filter(h=>h.date&&h.date.includes('pre-reset'));
+  // Show both legacy "pre-reset" snapshots and new "weekly-reset" snapshots.
+  const resets=hist.filter(h=>h.date && (h.date.includes('pre-reset') || h.date.includes('weekly-reset')));
   if(!resets.length){
-    document.getElementById('hList').innerHTML='<div class="empty"><div class="ei">📜</div><p>No reset history yet.<br>Order snapshots appear here after an Administrative reset.</p></div>';
+    document.getElementById('hList').innerHTML='<div class="empty"><div class="ei">📜</div><p>No reset history yet.<br>The full weekly order is snapshotted here every Monday at 8am.</p></div>';
     return;
   }
   document.getElementById('hList').innerHTML=[...resets].reverse().map((h,i)=>{
+    // Tally submitted vs pending for this weekly snapshot
+    var sCount=0, pCount=0;
+    (h.items||[]).forEach(function(it){
+      var s=it.status||'pending';
+      if(s==='submitted') sCount++; else pCount++;
+    });
     const itemsHtml=h.items.map(it=>{
       const p=gp(it.oracle);
-      return p?`<div class="hitem"><div class="hidesc">${DI[p[4]]} ${e(p[2])}</div><div class="himeta">Qty: ${it.qty} ${p[3]} &nbsp;·&nbsp; Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]}</div></div>`:'';
+      const itStatus=it.status||'pending';
+      const badge=itStatus==='submitted'
+        ? `<span class="stbadge stbadge-sub">✓ Submitted</span>`
+        : `<span class="stbadge stbadge-pend">● Pending</span>`;
+      const desc = p ? e(p[2]) : `Oracle #${it.oracle} (not in current catalog)`;
+      const meta = p
+        ? `Qty: ${it.qty} ${p[3]} &nbsp;·&nbsp; Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]}`
+        : `Qty: ${it.qty}`;
+      const ic = p ? DI[p[4]] : '📦';
+      return `<div class="hitem"><div class="hidesc">${badge} ${ic} ${desc}</div><div class="himeta">${meta}</div></div>`;
     }).join('');
+    const label = h.date.includes('weekly-reset') ? 'Week ended' : 'Reset';
     return`<div class="hcard" id="hcard-${i}">
       <div class="htop" onclick="toggleHist(${i})" style="cursor:pointer;user-select:none;">
         <div>
-          <div class="hdate">📅 ${h.date.replace(' (pre-reset)','')}</div>
-          <div class="hby">${h.submittedBy||'—'} &nbsp;·&nbsp; ${h.role||''} &nbsp;·&nbsp; ${h.items.length} total items</div>
+          <div class="hdate">📅 ${label} — ${h.date.replace(' (weekly-reset)','').replace(' (pre-reset)','')}</div>
+          <div class="hby">${h.submittedBy||'—'} &nbsp;·&nbsp; ${h.role||''} &nbsp;·&nbsp; <strong style="color:var(--teal)">${sCount}</strong> submitted, <strong style="color:var(--mech)">${pCount}</strong> pending &nbsp;·&nbsp; ${h.items.length} total</div>
         </div>
         <span class="hchev" style="font-size:14px;color:var(--teal);transition:transform .2s;">▼</span>
       </div>
@@ -2135,42 +2285,236 @@ function renderAdmin(){
   // and reflect the current backup timestamp every time the admin tab opens.
   if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
   const items=Object.entries(order).filter(([o,q])=>q>0);
+  // Update header counts for pending / submitted / carried-over
+  var pendCount=0, subCount=0, carried=0;
+  items.forEach(function(it){
+    var st=stat(it[0]);
+    if(st==='submitted') subCount++; else pendCount++;
+    if(st==='pending' && lastReset && (orderAdded[it[0]]||0) < lastReset) carried++;
+  });
+  var hdr=document.getElementById('adminStatusBar');
+  if(hdr){
+    var lrTxt = lastReset ? new Date(lastReset).toLocaleString() : 'never';
+    hdr.innerHTML =
+      `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);">`+
+      `<span><strong style="color:var(--mech)">${pendCount}</strong> pending</span>`+
+      `<span><strong style="color:var(--teal)">${subCount}</strong> submitted</span>`+
+      `<span><strong style="color:#d95f5f">${carried}</strong> carried over from last week</span>`+
+      `<span style="margin-left:auto;color:var(--muted2);">Last reset: ${lrTxt}</span>`+
+      `</div>`;
+  }
   if(!items.length){
     document.getElementById('kList').innerHTML='<div class="empty"><div class="ei">✅</div><p>No items in the current order.</p></div>';
     return;
   }
   document.getElementById('kList').innerHTML=items.map(([oracle,qty])=>{
     const p=gp(oracle);if(!p)return'';
+    const st=stat(oracle);
+    const isCarried = lastReset && (orderAdded[oracle]||0) < lastReset && st==='pending';
+    const pullBtn = st==='submitted'
+      ? `<button class="pullb pullb-done" onclick="pullPart('${oracle}')" title="Already submitted — click to unmark (toggles back to pending)" style="opacity:.85;">✓ Submitted</button>`
+      : `<button class="pullb" onclick="pullPart('${oracle}')" title="Mark this item as pulled / submitted">📤 Pull</button>`;
+    const carriedTag = isCarried ? `<span class="stbadge" style="color:#d95f5f;background:rgba(217,95,95,.08);border:1px solid rgba(217,95,95,.3);">↻ Last week</span>` : '';
     return`<div class="krow">
       <label class="kchk">
         <input type="checkbox" ${keep[oracle]?'checked':''} onchange="keep['${oracle}']=this.checked;save();" />
         Keep
       </label>
       <div class="kinfo">
-        <div class="kdesc">${DI[p[4]]} ${e(p[2].slice(0,90))}${p[2].length>90?'…':''}</div>
-        <div class="kmeta">Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; Qty: ${qty} ${p[3]}</div>
+        <div class="kdesc">${carriedTag} ${DI[p[4]]} ${e(p[2].slice(0,90))}${p[2].length>90?'…':''}</div>
+        <div class="kmeta">${st==='submitted'?'<span class="stbadge stbadge-sub">✓ Submitted</span>':'<span class="stbadge stbadge-pend">● Pending</span>'} Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; Qty: ${qty} ${p[3]}</div>
       </div>
+      ${pullBtn}
     </div>`;
   }).join('');
 }
 
-// ── SUBMIT / RESET ────────────────────────────────────────────
-// submit removed — history only tracks resets
+// Toggle Pull back to Pending if admin clicked on an already-submitted row.
+// pullPart sets it submitted; this override flips the other direction.
+(function(){
+  var _origPull=pullPart;
+  pullPart=function(oracle){
+    if(!user || user.role!=='Administrative'){ toast('Admin only'); return; }
+    if(stat(oracle)==='submitted'){
+      orderStatus[oracle]='pending';
+      save(); renderOrder(); renderAdmin(); badges();
+      toast('Reverted to pending');
+      return;
+    }
+    _origPull(oracle);
+  };
+})();
+
+// ── PULL / RESET ──────────────────────────────────────────────
+// Pull = admin marks a part (or all pending parts) as submitted. The item
+// stays visible on the weekly order so users can see it was received and
+// don't try to re-add it. Submitted items are auto-cleared at the next
+// Monday-8am reset.
+function pullPart(oracle){
+  if(!user || user.role!=='Administrative'){ toast('Admin only'); return; }
+  if(!(oracle in order)) return;
+  orderStatus[oracle]='submitted';
+  save();
+  renderOrder();renderAdmin();badges();
+  var p=gp(oracle);
+  writeLog('PULL', oracle, p?p[2]:'Oracle #'+oracle, order[oracle], user.name, user.role);
+  toast('Marked submitted');
+}
+function pullAllPending(){
+  if(!user || user.role!=='Administrative'){ toast('Admin only'); return; }
+  var n=0;
+  Object.keys(order).forEach(function(o){
+    if((order[o]||0)>0 && stat(o)!=='submitted'){
+      orderStatus[o]='submitted'; n++;
+    }
+  });
+  if(!n){ toast('Nothing pending to pull'); return; }
+  save(); renderOrder(); renderAdmin(); badges();
+  writeLog('PULL', '', 'All pending ('+n+' items)', n, user.name, user.role);
+  toast('Pulled '+n+' item'+(n===1?'':'s'));
+}
+
+// Compute the most recent Monday 08:00 in local time that has already passed.
+// Used to decide whether an auto-reset is overdue.
+function currentResetCutoff(){
+  var now=new Date();
+  // JS getDay(): Sun=0, Mon=1 ... Sat=6
+  var day=now.getDay();
+  var hour=now.getHours();
+  // Days to go BACK to reach the most recent Monday.
+  // If it's Monday and the clock is past 8am, the cutoff is today 8am.
+  // If it's Monday before 8am, the cutoff is last Monday 8am (7 days ago).
+  var back;
+  if(day===1){ back = (hour>=8) ? 0 : 7; }
+  else if(day===0){ back = 6; } // Sunday -> previous Monday
+  else { back = day - 1; }       // Tue=1, Wed=2, ...
+  var cutoff=new Date(now.getFullYear(),now.getMonth(),now.getDate()-back,8,0,0,0);
+  return cutoff.getTime();
+}
+
+// Auto-reset hook. Called on app load (after data is loaded). If we haven't
+// reset since the most recent Monday 8am, snapshot the whole week into
+// history (preserving each item's submitted/pending status + qty), then
+// clear ONLY submitted items. Pending items carry forward into the new week.
+function maybeAutoReset(){
+  var cutoff=currentResetCutoff();
+  if(lastReset>=cutoff) return false;
+  var items=Object.entries(order)
+    .filter(function(e){return (e[1]||0)>0;})
+    .map(function(e){
+      var o=e[0];
+      return { oracle:o, qty:e[1], status:stat(o), addedAt:orderAdded[o]||0 };
+    });
+  // First-ever load with an empty order: silently set the marker, don't
+  // snapshot an empty week and don't toast.
+  if(!items.length && !lastReset){
+    lastReset=Date.now();
+    try{ localStorage.setItem(SK.lr, String(lastReset)); }catch(e){}
+    if(fbReady){ try{ fbDb.ref('lastReset').set(lastReset); }catch(e){} }
+    return false;
+  }
+  if(items.length){
+    hist.push({
+      date:new Date().toLocaleString()+' (weekly-reset)',
+      submittedBy:'Auto (Monday 8am)',
+      role:'System',
+      items:items,
+      weekEnded:Date.now()
+    });
+  }
+  // Carry pending forward, clear submitted (except items the admin flagged
+  // as "Keep" — those stay regardless of status, matching prior behavior).
+  var nw={}, nstat={}, nadded={};
+  Object.keys(order).forEach(function(o){
+    var q=order[o]||0; if(q<=0) return;
+    var s=stat(o);
+    if(s==='submitted' && !keep[o]){
+      // dropped — already snapshotted
+    } else {
+      nw[o]=q;
+      nstat[o]= keep[o] ? s : 'pending'; // kept items keep their status; pending pending
+      nadded[o]= orderAdded[o]||0;
+    }
+  });
+  order=nw; orderStatus=nstat; orderAdded=nadded;
+  // Don't touch keep[] — it persists by design (admin's explicit per-item flag)
+  lastReset=Date.now();
+  save();
+  if(typeof renderAll==='function') renderAll();
+  if(typeof renderAdmin==='function') renderAdmin();
+  if(typeof badges==='function') badges();
+  toast('Weekly reset: submitted items moved to history');
+  return true;
+}
+
+// Admin: remove pending items that have been carried over from before
+// the most recent weekly reset. Anything added since the reset is left alone.
+function clearLastWeekPending(){
+  if(!user || user.role!=='Administrative'){ toast('Admin only'); return; }
+  if(!lastReset){ toast('No previous reset on record'); return; }
+  var toRemove=[];
+  Object.keys(order).forEach(function(o){
+    if((order[o]||0)<=0) return;
+    if(stat(o)!=='pending') return;
+    var added=orderAdded[o]||0;
+    if(added < lastReset) toRemove.push(o);
+  });
+  if(!toRemove.length){ toast('No carried-over pending items'); return; }
+  if(!confirm('Remove '+toRemove.length+' pending item'+(toRemove.length===1?'':'s')+' carried over from before the last weekly reset?\n\nThis cannot be undone. (Items added since the reset are NOT affected.)')) return;
+  toRemove.forEach(function(o){
+    var p=gp(o);
+    _forgetItem(o);
+    if(p) writeLog('REMOVE', o, p[2], '', user.name, user.role);
+  });
+  save(); renderAll(); renderAdmin(); badges();
+  toast('Cleared '+toRemove.length+' carried-over item'+(toRemove.length===1?'':'s'));
+}
+
+// Manual "Force reset now" — same as the auto reset but admin-triggered.
 function openReset(){
-  const kept=Object.entries(order).filter(([o,q])=>q>0&&keep[o]);
-  const rc=Object.values(order).filter(v=>v>0).length-kept.length;
+  const pendingCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='pending' && !keep[o]).length;
+  const subCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='submitted' && !keep[o]).length;
+  const keptCount=Object.entries(order).filter(([o,q])=>q>0 && keep[o]).length;
   document.getElementById('resSum').innerHTML=
-    `<span style="color:var(--danger)"><strong>${rc}</strong> items will be zeroed</span><br>`+
-    `<span style="color:var(--teal)"><strong>${kept.length}</strong> items will be kept</span>`;
+    `<span style="color:var(--teal)"><strong>${subCount}</strong> submitted item${subCount===1?'':'s'} will move to history</span><br>`+
+    `<span style="color:var(--mech)"><strong>${pendingCount}</strong> pending item${pendingCount===1?'':'s'} will carry forward to next week</span><br>`+
+    `<span style="color:var(--muted)"><strong>${keptCount}</strong> kept item${keptCount===1?'':'s'} will stay regardless</span>`;
   document.getElementById('mRes').classList.add('show');
 }
 function confReset(){
-  const items=Object.entries(order).filter(([o,q])=>q>0).map(([o,qty])=>({oracle:o,qty}));
-  if(items.length)hist.push({date:new Date().toLocaleString()+' (pre-reset)',submittedBy:user.name,role:user.role,items});
-  const nw={};
-  Object.entries(order).forEach(([o,q])=>{if(keep[o]&&q>0)nw[o]=q;});
-  order=nw;keep={};save();closeMod();renderAll();renderAdmin();toast('Order reset complete');
-
+  if(!user || user.role!=='Administrative'){ toast('Admin only'); closeMod(); return; }
+  // Reuse the same snapshot/clear logic as the auto path, but always run it.
+  var items=Object.entries(order)
+    .filter(function(e){return (e[1]||0)>0;})
+    .map(function(e){
+      var o=e[0];
+      return { oracle:o, qty:e[1], status:stat(o), addedAt:orderAdded[o]||0 };
+    });
+  if(items.length){
+    hist.push({
+      date:new Date().toLocaleString()+' (weekly-reset)',
+      submittedBy:user.name,
+      role:user.role,
+      items:items,
+      weekEnded:Date.now()
+    });
+  }
+  var nw={}, nstat={}, nadded={};
+  Object.keys(order).forEach(function(o){
+    var q=order[o]||0; if(q<=0) return;
+    var s=stat(o);
+    if(s==='submitted' && !keep[o]){
+      // drop
+    } else {
+      nw[o]=q;
+      nstat[o]= keep[o] ? s : 'pending';
+      nadded[o]= orderAdded[o]||0;
+    }
+  });
+  order=nw; orderStatus=nstat; orderAdded=nadded;
+  lastReset=Date.now();
+  save();closeMod();renderAll();renderAdmin();badges();
+  toast('Weekly reset complete');
 }
 function closeMod(){document.querySelectorAll('.mov').forEach(m=>m.classList.remove('show'));}
 
@@ -2178,6 +2522,78 @@ let tT;
 function toast(msg){
   const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
   clearTimeout(tT);tT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+// ── UPDATE BANNER ────────────────────────────────────────────
+// Bump BANNER_VERSION any time you want to re-show the banner to everyone
+// (even users who previously dismissed it). Format: YYYY-MM-DD-shortname —
+// the date prefix is read by _bannerExpired() to auto-stop the banner after
+// BANNER_DAYS days, so a new version automatically resets the 21-day clock.
+const BANNER_VERSION = '2026-05-22-pending-status';
+const BANNER_KEY = 'f6_banner_dismissed';
+const BANNER_DAYS = 21;
+
+// True if more than BANNER_DAYS have passed since the date encoded in
+// BANNER_VERSION. Returns false if the version string doesn't start with a
+// parseable YYYY-MM-DD (defensive — never expires a banner we can't date).
+function _bannerExpired(){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(BANNER_VERSION);
+  if(!m) return false;
+  var start = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10), 0,0,0,0);
+  if(isNaN(start.getTime())) return false;
+  var endMs = start.getTime() + BANNER_DAYS*24*60*60*1000;
+  return Date.now() > endMs;
+}
+
+// Two message variants — admins do the pulling, regular users do the requesting.
+const BANNER_MSGS = {
+  admin: [
+    `<span class="upd-em">📤 NEW WORKFLOW:</span> Click <strong>Pull</strong> on a part after you've ordered it — it stays visible to the user with a <strong>✓ Submitted</strong> badge so they know it was received.`,
+    `<span class="upd-em">🗓️ AUTO RESET:</span> Every <strong>Monday at 8 AM</strong> the order auto-snapshots to History and clears submitted items. Pending items roll over to the new week.`,
+    `<span class="upd-em">🧹 ADMIN TOOL:</span> Use <strong>Clear Last Week's Pending</strong> on the Admin tab to drop carried-over items the crew no longer needs.`,
+  ],
+  user: [
+    `<span class="upd-em">🆕 GOOD NEWS:</span> Items <strong>no longer disappear</strong> when the admin pulls them. They stay visible with a <strong>✓ Submitted</strong> badge so you don't accidentally add them again.`,
+    `<span class="upd-em">● PENDING</span> means waiting on admin. <strong>✓ SUBMITTED</strong> means the admin has it. The whole list refreshes <strong>every Monday at 8 AM</strong>.`,
+    `If a part you added shows up as <strong>✓ Submitted</strong>, it's been ordered — sit tight and don't re-add it.`,
+  ],
+};
+
+function showUpdateBanner(){
+  try{
+    if(!user) return;
+    if(_bannerExpired()) return;                 // auto-stop after BANNER_DAYS
+    var dismissed = localStorage.getItem(BANNER_KEY);
+    if(dismissed === BANNER_VERSION) return;     // already dismissed this version
+    var role = (user.role === 'Administrative') ? 'admin' : 'user';
+    var msgs = BANNER_MSGS[role] || [];
+    if(!msgs.length) return;
+    // Build the marquee track. Duplicate the set so the loop has no visible gap.
+    var html = '';
+    for(var pass=0; pass<2; pass++){
+      for(var i=0;i<msgs.length;i++){
+        html += '<span class="upd-msg">'+msgs[i]+'</span>';
+      }
+    }
+    var track = document.getElementById('updTrack');
+    var banner = document.getElementById('updBanner');
+    if(!track || !banner) return;
+    track.innerHTML = html;
+    banner.classList.add('show');
+    // Auto-tune animation speed to content length so longer messages don't crawl
+    // or whip by — target ~80px per second.
+    requestAnimationFrame(function(){
+      var w = track.scrollWidth;
+      var secs = Math.max(20, Math.round(w / 80));
+      track.style.animationDuration = secs + 's';
+    });
+  }catch(e){ console.warn('showUpdateBanner failed', e); }
+}
+
+function dismissUpdateBanner(){
+  try{ localStorage.setItem(BANNER_KEY, BANNER_VERSION); }catch(e){}
+  var banner = document.getElementById('updBanner');
+  if(banner) banner.classList.remove('show');
 }
 
 
