@@ -2414,12 +2414,17 @@ function maybeAutoReset(){
     return false;
   }
   if(items.length){
+    // Display the snapshot under the *cutoff* time (Mon 8:00 AM), not the
+    // wall-clock moment this code happened to run. The reset is conceptually
+    // "the Monday 8am snapshot" even if no one opened the app until later.
+    // firedAt preserves the actual execution time for auditing if needed.
     hist.push({
-      date:new Date().toLocaleString()+' (weekly-reset)',
+      date:new Date(cutoff).toLocaleString()+' (weekly-reset)',
       submittedBy:'Auto (Monday 8am)',
       role:'System',
       items:items,
-      weekEnded:Date.now()
+      weekEnded:cutoff,
+      firedAt:Date.now()
     });
   }
   // Carry pending forward, clear submitted (except items the admin flagged
@@ -2438,7 +2443,10 @@ function maybeAutoReset(){
   });
   order=nw; orderStatus=nstat; orderAdded=nadded;
   // Don't touch keep[] — it persists by design (admin's explicit per-item flag)
-  lastReset=Date.now();
+  // Stamp lastReset with the *cutoff* (not now) so it semantically represents
+  // "we have processed up to this Monday-8am boundary". Next week's cutoff
+  // will be strictly greater, so the comparison still triggers correctly.
+  lastReset=cutoff;
   save();
   if(typeof renderAll==='function') renderAll();
   if(typeof renderAdmin==='function') renderAdmin();
