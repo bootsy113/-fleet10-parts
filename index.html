@@ -1972,12 +1972,14 @@ function renderOrder(){
     `<div class="stat-box sd"><div class="sn">${c[2]}</div><div class="sl">Datavan</div></div>`+
     `<div class="stat-box sg"><div class="sn">${c[3]}</div><div class="sl">Turbine</div></div>`;
 
-  // Split into backorders (pending + flagged as backorder) and current week.
-  // Anything previously flagged that's been pulled (submitted/received) goes
-  // to the Current Week section but still shows the "was backorder" badge.
+  // Split into backorders vs current week using the *sticky flag* — once an
+  // item has been flagged as a backorder it stays in this section (with the
+  // segmented Pending/Submit/Receive toggle) even after the admin marks it,
+  // so the admin can keep adjusting status until the Monday reset moves it
+  // to history. Current Week items get the simpler Pull button.
   const filtered = items.filter(([o])=>{const p=gp(o);return p&&(df===''||p[4]==df);});
-  const backorders = filtered.filter(([o])=> isBackorder(o));
-  const currentWk  = filtered.filter(([o])=>!isBackorder(o));
+  const backorders = filtered.filter(([o])=> !!backorderFlag[o]);
+  const currentWk  = filtered.filter(([o])=> !backorderFlag[o]);
 
   // ── BACKORDERS section
   const boSec = document.getElementById('backorderSec');
@@ -2043,7 +2045,17 @@ function renderOrder(){
     else                      badge = `<span class="stbadge stbadge-pend" title="Waiting for admin to pull">● Pending</span>`;
     // Persistent "was a backorder" marker — sticks on the item even after pull.
     const boMark = backorderFlag[oracle] ? `<span class="stbadge stbadge-bo" title="This item was a backorder at some point">📦 Backorder</span>` : '';
-    const adminActions = isAdmin ? statusSegHtml(oracle) : '';
+    // Current Week items get a single Pull button — Submit / Revert. Status
+    // change between Submitted and Received is intentionally NOT offered
+    // here; the multi-status segmented toggle is reserved for the Backorders
+    // section, where the extra control matters.
+    const pullLabel = st==='submitted' ? '↩ Revert' : '📤 Submit';
+    const pullTitle = st==='submitted' ? 'Click to revert to Pending' : 'Mark Submitted (admin has ordered)';
+    const adminActions = isAdmin
+      ? `<div class="act-cluster">
+           <button class="pullb${st==='submitted'?' pullb-done':''}" onclick="pullPart('${oracle}')" title="${pullTitle}">${pullLabel}</button>
+         </div>`
+      : '';
     return`<div class="ord-item ord-${st}">
       <div class="odot" style="background:${DC[p[4]]}"></div>
       <div class="oinfo">
@@ -2485,12 +2497,28 @@ function renderAdmin(){
     const p=gp(oracle);if(!p)return'';
     const st=stat(oracle);
     const boFlag = !!backorderFlag[oracle];
-    const actCluster = statusSegHtml(oracle);
+    // Backorder rows get the segmented Pending/Submit/Receive toggle;
+    // current-week rows get a single Pull button (Submit ↔ Revert).
+    let actCluster;
+    let stBadge;
+    if(boFlag){
+      actCluster = statusSegHtml(oracle);
+      stBadge = ''; // segmented control already shows status visually
+    } else {
+      const pullLabel = st==='submitted' ? '↩ Revert' : '📤 Submit';
+      const pullTitle = st==='submitted' ? 'Click to revert to Pending' : 'Mark Submitted (ordered)';
+      actCluster = `<div class="act-cluster">
+        <button class="pullb${st==='submitted'?' pullb-done':''}" onclick="pullPart('${oracle}')" title="${pullTitle}">${pullLabel}</button>
+      </div>`;
+      stBadge = st==='submitted'
+        ? '<span class="stbadge stbadge-sub">✓ Submitted</span>'
+        : '<span class="stbadge stbadge-pend">● Pending</span>';
+    }
     const boTag = boFlag ? '<span class="stbadge stbadge-bo">📦 Backorder</span>' : '';
     return`<div class="krow">
       <div class="kinfo">
         <div class="kdesc">${boTag} ${DI[p[4]]} ${e(p[2].slice(0,90))}${p[2].length>90?'…':''}</div>
-        <div class="kmeta">Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; Qty: ${qty} ${p[3]}</div>
+        <div class="kmeta">${stBadge ? stBadge+' ' : ''}Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; Qty: ${qty} ${p[3]}</div>
       </div>
       ${actCluster}
     </div>`;
