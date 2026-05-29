@@ -207,6 +207,15 @@ input,select{outline:none;font-family:inherit;}
 .pullb:hover{background:var(--teal-d);}
 .pullb-done{background:transparent;color:#1eb474;border:1px solid rgba(30,180,116,.4);}
 .pullb-done:hover{background:rgba(30,180,116,.08);}
+/* Backorder card — same skeleton as .ord-item but a deeper accent + age badge + note row */
+.bo-card{background:var(--card);border:1px solid var(--border);border-left:3px solid #d4890a;border-radius:2px;padding:12px 14px;margin-bottom:8px;}
+.bo-row{display:flex;align-items:center;gap:12px;}
+.bo-age{flex-shrink:0;display:inline-flex;align-items:center;background:rgba(212,137,10,.12);color:#d4890a;border:1px solid rgba(212,137,10,.4);padding:3px 8px;border-radius:2px;font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;white-space:nowrap;}
+.bo-note{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:12px;color:var(--muted);line-height:1.45;}
+.bo-note .bo-note-label{font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:var(--muted2);margin-right:6px;}
+.bo-note-input{width:100%;padding:6px 8px;background:var(--nav);color:var(--text);border:1px solid var(--border);border-radius:2px;font-size:12px;font-family:inherit;margin-top:4px;resize:vertical;min-height:32px;}
+.bo-note-input:focus{outline:none;border-color:var(--teal);}
+.bo-note-empty{font-style:italic;color:var(--muted2);}
 
 /* ── UPDATE BANNER ── */
 .upd-banner{display:none;align-items:center;gap:12px;background:linear-gradient(90deg,rgba(30,180,116,.14),rgba(47,140,202,.14));border-top:1px solid rgba(30,180,116,.35);border-bottom:1px solid rgba(30,180,116,.35);padding:0;overflow:hidden;position:relative;}
@@ -612,6 +621,16 @@ input,select{outline:none;font-family:inherit;}
     <!-- ORDER TAB -->
     <div class="tab-content active" id="tab-order">
       <div class="stats-row" id="oStats"></div>
+
+      <!-- BACKORDERS — only rendered when there are pending items that survived a weekly reset. -->
+      <div id="backorderSec" style="display:none;margin-bottom:18px;">
+        <div class="sec-hd" style="margin-bottom:8px;">
+          <div class="sec-t" style="color:#d4890a;">📦 Backorders <span id="backorderCount" style="font-size:11px;color:var(--muted);font-weight:600;margin-left:6px;"></span></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted2);margin-bottom:10px;line-height:1.5;">Items carried over from a previous week — still pending fulfillment. Admins can add a note explaining the delay or ETA.</div>
+        <div id="backorderList"></div>
+      </div>
+
       <div class="sec-hd">
         <div class="sec-t">Current Week — Fleet 6</div>
         <div class="sec-a">
@@ -675,18 +694,18 @@ input,select{outline:none;font-family:inherit;}
       <div class="acard">
         <h3>🔐 Administrative Controls</h3>
         <div class="warnbox">
-          ℹ️ <strong>How the weekly cycle works:</strong> Click <strong>📤 Pull</strong> on a part after you've physically pulled / ordered it — it stays visible to users (marked <em>Submitted</em>) so they know it was received. Every <strong>Monday at 8:00 AM</strong> the app automatically snapshots the full week to history, removes submitted items, and carries pending items forward. Use <strong>Clear Last Week's Pending</strong> below to drop carried-over items the team no longer needs.
+          ℹ️ <strong>How the weekly cycle works:</strong> Click <strong>📤 Pull</strong> on a part after you've ordered it — it stays visible to users (marked <em>Submitted</em>) so they know it was received. Every <strong>Monday at 8:00 AM</strong> the app automatically moves submitted items to history. Anything still pending becomes a <strong>Backorder</strong> on the My Order tab — add a note explaining the delay or ETA so the crew knows the status.
         </div>
         <div id="adminStatusBar" style="margin-bottom:12px;padding:10px 12px;background:var(--nav);border:1px solid var(--border);border-radius:2px;"></div>
         <div class="sec-hd" style="flex-wrap:wrap;gap:8px;">
           <div class="sec-t">Current Week's Order</div>
           <button class="btn-primary" onclick="pullAllPending()" style="background:var(--teal);">📤 Pull All Pending</button>
-          <button class="btn-ghost" onclick="clearLastWeekPending()" title="Removes only pending items left over from before the last Monday-8am reset">🧹 Clear Last Week's Pending</button>
+          <button class="btn-ghost" onclick="clearLastWeekPending()" title="Removes backorders the team no longer needs">🧹 Clear Old Backorders</button>
           <button class="btn-danger" onclick="openReset()" title="Force a weekly snapshot now instead of waiting for Monday 8am">🗑️ Force Weekly Reset Now</button>
           <button class="btn-primary" onclick="openEventLog()" style="background:#2f8cca;border:none;">📝 View Event Log</button>
           <button class="help-btn" onclick="openHelp('admin')" title="What does Admin do?" aria-label="Help">?</button>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Pull items as you fill them. Check <strong>Keep</strong> to preserve an item across the weekly reset regardless of status.</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Click <strong>Pull</strong> as items are physically pulled / ordered. Backorder notes are edited on the My Order tab.</div>
         <div id="kList"></div>
       </div>
 
@@ -791,7 +810,7 @@ input,select{outline:none;font-family:inherit;}
 <div class="mov" id="mRes">
   <div class="modal">
     <h3>⚠️ Force Weekly Reset</h3>
-    <p style="font-size:13px;color:var(--muted);line-height:1.55;">Snapshots the entire current week to history (with submitted/pending status preserved), then removes <strong>submitted</strong> items. <strong>Pending</strong> items carry forward into the new week. Items marked <em>Keep</em> stay regardless.</p>
+    <p style="font-size:13px;color:var(--muted);line-height:1.55;">Moves all <strong>submitted</strong> items to history (closing out this week's order). <strong>Pending</strong> items stay in the active order and appear as Backorders, with the original "ordered N days ago" age preserved.</p>
     <p style="font-size:11px;color:var(--muted2);">This happens automatically every Monday at 8am — use this only if you need to start a new week early.</p>
     <div class="msum" id="resSum"></div>
     <div class="mbtns"><button class="btn-ghost" onclick="closeMod()">Cancel</button><button class="btn-danger" onclick="confReset()">Snapshot &amp; Start New Week</button></div>
@@ -1298,18 +1317,39 @@ let fTmr=null;                 // debounce handle for favorites search
 let _favFuse=null, _favFuseKey=''; // cached Fuse for favorites pool
 const PG=50;
 // Storage keys. New (2026-05): s=item status (pending/submitted), a=added-at ms,
-// lr=lastReset ms (timestamp of most recent Monday-8am snapshot).
-const SK={o:'f6_ord',k:'f6_kp',h:'f6_hi',b:'f6_ob',s:'f6_os',a:'f6_oa',lr:'f6_lr'};
+// lr=lastReset ms (timestamp of most recent Monday-8am snapshot), n=order notes
+// (admin's per-item comment explaining why a backorder hasn't shipped yet).
+const SK={o:'f6_ord',k:'f6_kp',h:'f6_hi',b:'f6_ob',s:'f6_os',a:'f6_oa',lr:'f6_lr',n:'f6_on'};
 // Parallel maps that travel alongside `order`. orderStatus keeps the
 // pending/submitted state per oracle. orderAdded keeps the ms timestamp the
-// item was last touched (added or incremented) — used by "Clear last week's
-// pending" to identify items carried over from before the most recent reset.
-var orderStatus={}, orderAdded={};
+// item was first added (preserved across qty bumps so backorder age is true).
+// orderNotes holds an admin comment per oracle, surfaced in the Backorders
+// section so the whole team can see why an item hasn't shipped yet.
+var orderStatus={}, orderAdded={}, orderNotes={};
 // Last weekly-reset timestamp in ms (Monday 08:00 local). 0 = never reset.
 var lastReset=0;
 // Resolves a status, falling back to 'pending' for any legacy item that
 // existed before the status field was introduced.
 function stat(oracle){ return (orderStatus && orderStatus[oracle]) || 'pending'; }
+// True when an item is pending AND was first added before the most recent
+// weekly reset — i.e. it survived a Monday-8am rollover without being pulled.
+function isBackorder(oracle){
+  if(!lastReset) return false;
+  if(stat(oracle) !== 'pending') return false;
+  var added = orderAdded[oracle] || 0;
+  return added > 0 && added < lastReset;
+}
+// Pretty-format an age in ms as "Xw Yd" / "Yd" / "<1d".
+function fmtAge(ms){
+  if(!ms || ms<0) return '—';
+  var days = Math.floor(ms / 86400000);
+  if(days < 1) return '<1 day';
+  var weeks = Math.floor(days / 7);
+  var rem   = days - weeks*7;
+  if(weeks <= 0) return days + (days===1?' day':' days');
+  if(rem === 0)  return weeks + (weeks===1?' week':' weeks');
+  return weeks + 'w ' + rem + 'd';
+}
 var favNicks={};  // {oracle: nickname} per role
 var favColors={}; // {oracle: colorKey} per role
 var favGroups={}; // {colorKey: groupName} per role
@@ -1433,6 +1473,12 @@ function fbInit(){
       try{ localStorage.setItem(SK.lr, String(lastReset)); }catch(e){}
       _rerender();
     });
+    fbDb.ref('orderNotes').on('value', function(snap){
+      var v = snap.val() || {};
+      orderNotes = v;
+      try{ localStorage.setItem(SK.n, JSON.stringify(orderNotes)); }catch(e){}
+      _rerender();
+    });
     fbDb.ref('hist').on('value', function(snap){
       var v = snap.val() || [];
       hist = Array.isArray(v) ? v : Object.values(v);
@@ -1548,6 +1594,7 @@ function _fbFlush(){
     fbDb.ref('keep').set(keep || {});
     fbDb.ref('orderStatus').set(orderStatus || {});
     fbDb.ref('orderAdded').set(orderAdded || {});
+    fbDb.ref('orderNotes').set(orderNotes || {});
     fbDb.ref('lastReset').set(lastReset || 0);
     fbDb.ref('hist').set(hist || []);
     var role = user.role;
@@ -1567,6 +1614,7 @@ function save(){
     localStorage.setItem(SK.k,JSON.stringify(keep));
     localStorage.setItem(SK.s,JSON.stringify(orderStatus));
     localStorage.setItem(SK.a,JSON.stringify(orderAdded));
+    localStorage.setItem(SK.n,JSON.stringify(orderNotes));
     localStorage.setItem(SK.lr,String(lastReset||0));
     localStorage.setItem(favsKey(),JSON.stringify(favs));
     localStorage.setItem(nickKey(),JSON.stringify(favNicks));
@@ -1587,6 +1635,7 @@ function load(){
     keep=JSON.parse(localStorage.getItem(SK.k)||'{}');
     orderStatus=JSON.parse(localStorage.getItem(SK.s)||'{}');
     orderAdded=JSON.parse(localStorage.getItem(SK.a)||'{}');
+    orderNotes=JSON.parse(localStorage.getItem(SK.n)||'{}');
     lastReset=parseInt(localStorage.getItem(SK.lr)||'0',10)||0;
     favs=JSON.parse(localStorage.getItem(favsKey())||'{}');
     favNicks=JSON.parse(localStorage.getItem(nickKey())||'{}');
@@ -1596,7 +1645,7 @@ function load(){
     hist=JSON.parse(localStorage.getItem(SK.h)||'[]');
     deptOverrides=JSON.parse(localStorage.getItem('f6_dept_overrides')||'{}');
     uomOverrides=JSON.parse(localStorage.getItem('f6_uom_overrides')||'{}');
-  }catch(e){order={};orderBy={};keep={};orderStatus={};orderAdded={};lastReset=0;favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};uomOverrides={};}
+  }catch(e){order={};orderBy={};keep={};orderStatus={};orderAdded={};orderNotes={};lastReset=0;favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};uomOverrides={};}
   // Backfill: any existing order item missing a status/addedAt becomes
   // pending and is dated to the last reset (so it's treated as "from last
   // week" and the admin can clear it explicitly if needed).
@@ -1748,17 +1797,19 @@ function e(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 
 // ── ORDER ACTIONS ────────────────────────────────────────────
 // Helper: a brand-new add or a qty bump always re-marks an item as
-// 'pending' — the admin needs to know there's something new to pull. Also
-// refreshes addedAt so "Clear last week pending" leaves it alone.
+// 'pending' — the admin needs to know there's something new to pull. The
+// "first added" timestamp is only set ONCE per item so that bumping qty on
+// a long-outstanding backorder doesn't reset its age counter to zero.
 function _markPending(oracle){
   orderStatus[oracle]='pending';
-  orderAdded[oracle]=Date.now();
+  if(!orderAdded[oracle]) orderAdded[oracle]=Date.now();
 }
 function _forgetItem(oracle){
   delete order[oracle];
   delete orderBy[oracle];
   delete orderStatus[oracle];
   delete orderAdded[oracle];
+  delete orderNotes[oracle];
   delete keep[oracle];
 }
 function addP(oracle,qty){
@@ -1860,6 +1911,19 @@ function togF(oracle,btn){
 }
 
 // ── ORDER TAB ───────────────────────────────────────────────
+// Admin-only: set/clear the note on a backorder item. Trims, deletes when empty.
+function setBackorderNote(oracle, text){
+  if(!user || user.role!=='Administrative') return;
+  var t = (text||'').trim();
+  if(t) orderNotes[oracle] = t;
+  else  delete orderNotes[oracle];
+  save();
+  // Don't re-render the whole list — that would steal focus from a textarea.
+  // Just update the visible "last edited" tag if there is one.
+  var stamp = document.getElementById('bo-note-stamp-'+oracle);
+  if(stamp){ stamp.textContent = t ? '· note saved' : ''; }
+}
+
 function renderOrder(){
   const df=document.getElementById('oDeptF').value;
   const items=Object.entries(order).filter(([o,q])=>q>0);
@@ -1875,12 +1939,65 @@ function renderOrder(){
     `<div class="stat-box se"><div class="sn">${c[1]}</div><div class="sl">Electrical</div></div>`+
     `<div class="stat-box sd"><div class="sn">${c[2]}</div><div class="sl">Datavan</div></div>`+
     `<div class="stat-box sg"><div class="sn">${c[3]}</div><div class="sl">Turbine</div></div>`;
-  const fil=items.filter(([o])=>{const p=gp(o);return p&&(df===''||p[4]==df);});
-  if(!fil.length){
+
+  // Split into backorders (pending + carried over from prior week) and current week.
+  const filtered = items.filter(([o])=>{const p=gp(o);return p&&(df===''||p[4]==df);});
+  const backorders = filtered.filter(([o])=> isBackorder(o));
+  const currentWk  = filtered.filter(([o])=>!isBackorder(o));
+
+  // ── BACKORDERS section
+  const boSec = document.getElementById('backorderSec');
+  const boCount = document.getElementById('backorderCount');
+  const boList = document.getElementById('backorderList');
+  if(backorders.length){
+    boSec.style.display='block';
+    boCount.textContent = '— '+backorders.length+' outstanding';
+    const isAdmin = user && user.role==='Administrative';
+    boList.innerHTML = backorders.map(([oracle, qty])=>{
+      const p=gp(oracle); if(!p) return '';
+      const age = fmtAge(Date.now() - (orderAdded[oracle]||0));
+      const note = orderNotes[oracle] || '';
+      const orderedOn = orderAdded[oracle] ? new Date(orderAdded[oracle]).toLocaleDateString() : 'unknown';
+      const noteHtml = isAdmin
+        ? `<div class="bo-note">
+             <div><span class="bo-note-label">Admin note</span><span id="bo-note-stamp-${oracle}" style="font-size:10px;color:var(--muted2);"></span></div>
+             <textarea class="bo-note-input" placeholder="Reason for delay, ETA, vendor info…" onchange="setBackorderNote('${oracle}', this.value)" onblur="setBackorderNote('${oracle}', this.value)">${e(note)}</textarea>
+           </div>`
+        : (note
+            ? `<div class="bo-note"><span class="bo-note-label">Note</span>${e(note)}</div>`
+            : `<div class="bo-note bo-note-empty"><span class="bo-note-label">Note</span>No note from admin yet</div>`);
+      return `<div class="bo-card">
+        <div class="bo-row">
+          <div class="odot" style="background:${DC[p[4]]}"></div>
+          <div class="oinfo">
+            <div class="odesc"><span class="bo-age" title="Ordered ${orderedOn}">⏱ ${age}</span> ${e(p[2])}</div>
+            <div class="ometa">${DI[p[4]]} ${DN[p[4]]} &nbsp;·&nbsp; Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; UOM: ${p[3]} &nbsp;·&nbsp; Ordered ${orderedOn}</div>
+          </div>
+          <div class="qwrap">
+            <button class="qb" onclick="adjQ('${oracle}',-1)">−</button>
+            <input class="qi" type="number" value="${qty}" min="1" onchange="setQ('${oracle}',this.value)" onblur="renderOrder()" />
+            <button class="qb" onclick="adjQ('${oracle}',1)">+</button>
+          </div>
+          <button class="rm" onclick="rmP('${oracle}')">✕</button>
+        </div>
+        ${noteHtml}
+      </div>`;
+    }).join('');
+  } else {
+    boSec.style.display='none';
+    boList.innerHTML='';
+  }
+
+  // ── CURRENT WEEK section
+  if(!currentWk.length && !backorders.length){
     document.getElementById('oList').innerHTML='<div class="empty"><div class="ei">🛒</div><p>No items yet.<br>Browse the Master List to add parts.</p></div>';
     return;
   }
-  document.getElementById('oList').innerHTML=fil.map(([oracle,qty])=>{
+  if(!currentWk.length){
+    document.getElementById('oList').innerHTML='<div class="empty"><div class="ei">✨</div><p style="font-size:13px;">No new items this week yet — just backorders above.<br>Browse the Master List to add fresh parts.</p></div>';
+    return;
+  }
+  document.getElementById('oList').innerHTML=currentWk.map(([oracle,qty])=>{
     const p=gp(oracle);if(!p)return'';
     const st=stat(oracle);
     const badge=st==='submitted'
@@ -2285,12 +2402,12 @@ function renderAdmin(){
   // and reflect the current backup timestamp every time the admin tab opens.
   if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
   const items=Object.entries(order).filter(([o,q])=>q>0);
-  // Update header counts for pending / submitted / carried-over
-  var pendCount=0, subCount=0, carried=0;
+  // Update header counts for pending / submitted / backorders
+  var pendCount=0, subCount=0, boCount=0;
   items.forEach(function(it){
     var st=stat(it[0]);
     if(st==='submitted') subCount++; else pendCount++;
-    if(st==='pending' && lastReset && (orderAdded[it[0]]||0) < lastReset) carried++;
+    if(isBackorder(it[0])) boCount++;
   });
   var hdr=document.getElementById('adminStatusBar');
   if(hdr){
@@ -2299,7 +2416,7 @@ function renderAdmin(){
       `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);">`+
       `<span><strong style="color:var(--mech)">${pendCount}</strong> pending</span>`+
       `<span><strong style="color:var(--teal)">${subCount}</strong> submitted</span>`+
-      `<span><strong style="color:#d95f5f">${carried}</strong> carried over from last week</span>`+
+      `<span><strong style="color:#d4890a">${boCount}</strong> backorder${boCount===1?'':'s'}</span>`+
       `<span style="margin-left:auto;color:var(--muted2);">Last reset: ${lrTxt}</span>`+
       `</div>`;
   }
@@ -2310,16 +2427,12 @@ function renderAdmin(){
   document.getElementById('kList').innerHTML=items.map(([oracle,qty])=>{
     const p=gp(oracle);if(!p)return'';
     const st=stat(oracle);
-    const isCarried = lastReset && (orderAdded[oracle]||0) < lastReset && st==='pending';
+    const isCarried = isBackorder(oracle);
     const pullBtn = st==='submitted'
       ? `<button class="pullb pullb-done" onclick="pullPart('${oracle}')" title="Already submitted — click to unmark (toggles back to pending)" style="opacity:.85;">✓ Submitted</button>`
       : `<button class="pullb" onclick="pullPart('${oracle}')" title="Mark this item as pulled / submitted">📤 Pull</button>`;
-    const carriedTag = isCarried ? `<span class="stbadge" style="color:#d95f5f;background:rgba(217,95,95,.08);border:1px solid rgba(217,95,95,.3);">↻ Last week</span>` : '';
+    const carriedTag = isCarried ? `<span class="stbadge" style="color:#d4890a;background:rgba(212,137,10,.10);border:1px solid rgba(212,137,10,.4);">📦 Backorder</span>` : '';
     return`<div class="krow">
-      <label class="kchk">
-        <input type="checkbox" ${keep[oracle]?'checked':''} onchange="keep['${oracle}']=this.checked;save();" />
-        Keep
-      </label>
       <div class="kinfo">
         <div class="kdesc">${carriedTag} ${DI[p[4]]} ${e(p[2].slice(0,90))}${p[2].length>90?'…':''}</div>
         <div class="kmeta">${st==='submitted'?'<span class="stbadge stbadge-sub">✓ Submitted</span>':'<span class="stbadge stbadge-pend">● Pending</span>'} Oracle: ${p[0]} &nbsp;·&nbsp; SAGE: ${p[1]} &nbsp;·&nbsp; Qty: ${qty} ${p[3]}</div>
@@ -2393,136 +2506,110 @@ function currentResetCutoff(){
 }
 
 // Auto-reset hook. Called on app load (after data is loaded). If we haven't
-// reset since the most recent Monday 8am, snapshot the whole week into
-// history (preserving each item's submitted/pending status + qty), then
-// clear ONLY submitted items. Pending items carry forward into the new week.
+// reset since the most recent Monday 8am, snapshot ONLY THE SUBMITTED items
+// into history and remove them from the active order. Pending items stay put
+// (they become "backorders" — visible in the Backorders section on My Order).
 function maybeAutoReset(){
   var cutoff=currentResetCutoff();
   if(lastReset>=cutoff) return false;
-  var items=Object.entries(order)
-    .filter(function(e){return (e[1]||0)>0;})
+  // Pull just the submitted items — that's what we promised users we'd ship.
+  var subItems=Object.entries(order)
+    .filter(function(e){return (e[1]||0)>0 && stat(e[0])==='submitted';})
     .map(function(e){
       var o=e[0];
-      return { oracle:o, qty:e[1], status:stat(o), addedAt:orderAdded[o]||0 };
+      return { oracle:o, qty:e[1], status:'submitted', addedAt:orderAdded[o]||0 };
     });
   // First-ever load with an empty order: silently set the marker, don't
   // snapshot an empty week and don't toast.
-  if(!items.length && !lastReset){
-    lastReset=Date.now();
+  if(!subItems.length && !Object.keys(order).length && !lastReset){
+    lastReset=cutoff;
     try{ localStorage.setItem(SK.lr, String(lastReset)); }catch(e){}
     if(fbReady){ try{ fbDb.ref('lastReset').set(lastReset); }catch(e){} }
     return false;
   }
-  if(items.length){
-    // Display the snapshot under the *cutoff* time (Mon 8:00 AM), not the
-    // wall-clock moment this code happened to run. The reset is conceptually
-    // "the Monday 8am snapshot" even if no one opened the app until later.
-    // firedAt preserves the actual execution time for auditing if needed.
+  if(subItems.length){
+    // History entry is stamped with the *cutoff* time (Mon 8:00 AM), not the
+    // wall-clock moment the code ran. firedAt records actual execution time
+    // for auditing.
     hist.push({
       date:new Date(cutoff).toLocaleString()+' (weekly-reset)',
       submittedBy:'Auto (Monday 8am)',
       role:'System',
-      items:items,
+      items:subItems,
       weekEnded:cutoff,
       firedAt:Date.now()
     });
   }
-  // Carry pending forward, clear submitted (except items the admin flagged
-  // as "Keep" — those stay regardless of status, matching prior behavior).
-  var nw={}, nstat={}, nadded={};
-  Object.keys(order).forEach(function(o){
-    var q=order[o]||0; if(q<=0) return;
-    var s=stat(o);
-    if(s==='submitted' && !keep[o]){
-      // dropped — already snapshotted
-    } else {
-      nw[o]=q;
-      nstat[o]= keep[o] ? s : 'pending'; // kept items keep their status; pending pending
-      nadded[o]= orderAdded[o]||0;
-    }
-  });
-  order=nw; orderStatus=nstat; orderAdded=nadded;
-  // Don't touch keep[] — it persists by design (admin's explicit per-item flag)
-  // Stamp lastReset with the *cutoff* (not now) so it semantically represents
-  // "we have processed up to this Monday-8am boundary". Next week's cutoff
-  // will be strictly greater, so the comparison still triggers correctly.
+  // Remove just the submitted items from the active order. Pending items
+  // are left exactly as they are — same qty, same orderAdded — so they
+  // automatically become backorders without any extra bookkeeping.
+  subItems.forEach(function(it){ _forgetItem(it.oracle); });
+  // Stamp lastReset with the *cutoff* so it semantically represents "we have
+  // processed up to this Monday-8am boundary".
   lastReset=cutoff;
   save();
   if(typeof renderAll==='function') renderAll();
   if(typeof renderAdmin==='function') renderAdmin();
   if(typeof badges==='function') badges();
-  toast('Weekly reset: submitted items moved to history');
+  if(subItems.length){
+    toast('Weekly reset: '+subItems.length+' submitted item'+(subItems.length===1?'':'s')+' moved to history');
+  }
   return true;
 }
 
-// Admin: remove pending items that have been carried over from before
-// the most recent weekly reset. Anything added since the reset is left alone.
+// Admin: remove backorder items the team no longer needs. Items added since
+// the most recent weekly reset (current-week items) are left alone.
 function clearLastWeekPending(){
   if(!user || user.role!=='Administrative'){ toast('Admin only'); return; }
   if(!lastReset){ toast('No previous reset on record'); return; }
-  var toRemove=[];
-  Object.keys(order).forEach(function(o){
-    if((order[o]||0)<=0) return;
-    if(stat(o)!=='pending') return;
-    var added=orderAdded[o]||0;
-    if(added < lastReset) toRemove.push(o);
-  });
-  if(!toRemove.length){ toast('No carried-over pending items'); return; }
-  if(!confirm('Remove '+toRemove.length+' pending item'+(toRemove.length===1?'':'s')+' carried over from before the last weekly reset?\n\nThis cannot be undone. (Items added since the reset are NOT affected.)')) return;
+  var toRemove=Object.keys(order).filter(function(o){ return isBackorder(o); });
+  if(!toRemove.length){ toast('No backorders to clear'); return; }
+  if(!confirm('Remove '+toRemove.length+' backorder'+(toRemove.length===1?'':'s')+' from the active order?\n\nThis cannot be undone. (Current-week items are NOT affected.)')) return;
   toRemove.forEach(function(o){
     var p=gp(o);
     _forgetItem(o);
     if(p) writeLog('REMOVE', o, p[2], '', user.name, user.role);
   });
   save(); renderAll(); renderAdmin(); badges();
-  toast('Cleared '+toRemove.length+' carried-over item'+(toRemove.length===1?'':'s'));
+  toast('Cleared '+toRemove.length+' backorder'+(toRemove.length===1?'':'s'));
 }
 
 // Manual "Force reset now" — same as the auto reset but admin-triggered.
 function openReset(){
-  const pendingCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='pending' && !keep[o]).length;
-  const subCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='submitted' && !keep[o]).length;
-  const keptCount=Object.entries(order).filter(([o,q])=>q>0 && keep[o]).length;
+  const pendingCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='pending').length;
+  const subCount=Object.entries(order).filter(([o,q])=>q>0 && stat(o)==='submitted').length;
   document.getElementById('resSum').innerHTML=
     `<span style="color:var(--teal)"><strong>${subCount}</strong> submitted item${subCount===1?'':'s'} will move to history</span><br>`+
-    `<span style="color:var(--mech)"><strong>${pendingCount}</strong> pending item${pendingCount===1?'':'s'} will carry forward to next week</span><br>`+
-    `<span style="color:var(--muted)"><strong>${keptCount}</strong> kept item${keptCount===1?'':'s'} will stay regardless</span>`;
+    `<span style="color:var(--mech)"><strong>${pendingCount}</strong> pending item${pendingCount===1?'':'s'} will stay as Backorders</span>`;
   document.getElementById('mRes').classList.add('show');
 }
 function confReset(){
   if(!user || user.role!=='Administrative'){ toast('Admin only'); closeMod(); return; }
-  // Reuse the same snapshot/clear logic as the auto path, but always run it.
-  var items=Object.entries(order)
-    .filter(function(e){return (e[1]||0)>0;})
+  // Same logic as the auto path: snapshot only submitted items, leave pending.
+  var subItems=Object.entries(order)
+    .filter(function(e){return (e[1]||0)>0 && stat(e[0])==='submitted';})
     .map(function(e){
       var o=e[0];
-      return { oracle:o, qty:e[1], status:stat(o), addedAt:orderAdded[o]||0 };
+      return { oracle:o, qty:e[1], status:'submitted', addedAt:orderAdded[o]||0 };
     });
-  if(items.length){
+  if(subItems.length){
     hist.push({
       date:new Date().toLocaleString()+' (weekly-reset)',
       submittedBy:user.name,
       role:user.role,
-      items:items,
-      weekEnded:Date.now()
+      items:subItems,
+      weekEnded:Date.now(),
+      firedAt:Date.now()
     });
   }
-  var nw={}, nstat={}, nadded={};
-  Object.keys(order).forEach(function(o){
-    var q=order[o]||0; if(q<=0) return;
-    var s=stat(o);
-    if(s==='submitted' && !keep[o]){
-      // drop
-    } else {
-      nw[o]=q;
-      nstat[o]= keep[o] ? s : 'pending';
-      nadded[o]= orderAdded[o]||0;
-    }
-  });
-  order=nw; orderStatus=nstat; orderAdded=nadded;
-  lastReset=Date.now();
+  subItems.forEach(function(it){ _forgetItem(it.oracle); });
+  // Set lastReset to the most recent cutoff so it semantically represents
+  // "we've processed through Monday 8am of this week"; max() guards against
+  // an admin forcing a reset before 8am Monday, which would otherwise let
+  // the auto-reset fire again a few hours later.
+  lastReset=Math.max(currentResetCutoff(), lastReset);
   save();closeMod();renderAll();renderAdmin();badges();
-  toast('Weekly reset complete');
+  toast('Weekly reset complete — '+subItems.length+' submitted item'+(subItems.length===1?'':'s')+' moved to history');
 }
 function closeMod(){document.querySelectorAll('.mov').forEach(m=>m.classList.remove('show'));}
 
@@ -2537,7 +2624,7 @@ function toast(msg){
 // (even users who previously dismissed it). Format: YYYY-MM-DD-shortname —
 // the date prefix is read by _bannerExpired() to auto-stop the banner after
 // BANNER_DAYS days, so a new version automatically resets the 21-day clock.
-const BANNER_VERSION = '2026-05-22-pending-status';
+const BANNER_VERSION = '2026-05-26-backorders';
 const BANNER_KEY = 'f6_banner_dismissed';
 const BANNER_DAYS = 21;
 
@@ -2556,14 +2643,15 @@ function _bannerExpired(){
 // Two message variants — admins do the pulling, regular users do the requesting.
 const BANNER_MSGS = {
   admin: [
-    `<span class="upd-em">📤 NEW WORKFLOW:</span> Click <strong>Pull</strong> on a part after you've ordered it — it stays visible to the user with a <strong>✓ Submitted</strong> badge so they know it was received.`,
-    `<span class="upd-em">🗓️ AUTO RESET:</span> Every <strong>Monday at 8 AM</strong> the order auto-snapshots to History and clears submitted items. Pending items roll over to the new week.`,
-    `<span class="upd-em">🧹 ADMIN TOOL:</span> Use <strong>Clear Last Week's Pending</strong> on the Admin tab to drop carried-over items the crew no longer needs.`,
+    `<span class="upd-em">📦 NEW: BACKORDERS SECTION</span> on the My Order tab — any pending item that survives a Monday reset shows up there with the original "ordered X days/weeks ago" age preserved.`,
+    `<span class="upd-em">📝 ADD A NOTE:</span> On each backorder you'll see an editable note field. Type the reason for delay or an ETA — the whole crew sees it so they know status.`,
+    `<span class="upd-em">🗓️ WEEKLY HISTORY:</span> Only <strong>submitted</strong> items move to history now. Pending items stay live as backorders until you pull or clear them.`,
+    `<span class="upd-em">🧹 ADMIN TOOLS:</span> "Pull All Pending" closes out the week's new requests; "Clear Old Backorders" drops outstanding items the team no longer needs.`,
   ],
   user: [
-    `<span class="upd-em">🆕 GOOD NEWS:</span> Items <strong>no longer disappear</strong> when the admin pulls them. They stay visible with a <strong>✓ Submitted</strong> badge so you don't accidentally add them again.`,
-    `<span class="upd-em">● PENDING</span> means waiting on admin. <strong>✓ SUBMITTED</strong> means the admin has it. The whole list refreshes <strong>every Monday at 8 AM</strong>.`,
-    `If a part you added shows up as <strong>✓ Submitted</strong>, it's been ordered — sit tight and don't re-add it.`,
+    `<span class="upd-em">📦 NEW: BACKORDERS</span> — items you ordered that weren't filled before Monday now stay visible at the top of My Order with a <strong>"X days/weeks"</strong> age tag, so nothing falls through the cracks.`,
+    `<span class="upd-em">💬 LOOK FOR NOTES:</span> The admin can attach a note to each backorder explaining the delay or ETA. Check there before re-asking.`,
+    `<span class="upd-em">● PENDING</span> = waiting on admin. <strong>✓ SUBMITTED</strong> = admin has ordered it. Submitted items clear automatically every <strong>Monday at 8 AM</strong>.`,
   ],
 };
 
