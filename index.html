@@ -722,7 +722,7 @@ input,select{outline:none;font-family:inherit;}
       <div class="acard">
         <h3>🔐 Administrative Controls</h3>
         <div class="warnbox">
-          ℹ️ <strong>How the weekly cycle works:</strong> Click <strong>📤 Submit</strong> on a part once you've ordered it in Oracle (marked <em>Submitted</em> so the crews know it's handled). Every <strong>Monday at 8:00 AM</strong> the whole week's order moves to <strong>History</strong>. When parts arrive <strong>Friday</strong>, anyone runs the <strong>Parts Received Audit</strong> in History — whatever isn't received resurfaces as <em>not received from previous week</em> so it isn't ordered again by mistake.
+          ℹ️ <strong>How the weekly cycle works:</strong> Click <strong>📤 Submit</strong> on a part once you've ordered it in Oracle (marked <em>Submitted</em> so the crews know it's handled). Every <strong id="warnResetWhen">Monday at 8:00 AM</strong> the whole week's order moves to <strong>History</strong>. When parts arrive <strong id="warnAuditWhen">Friday</strong>, anyone runs the <strong>Parts Received Audit</strong> in History — whatever isn't received resurfaces as <em>not received from previous week</em> so it isn't ordered again by mistake.
         </div>
         <div id="adminStatusBar" style="margin-bottom:12px;padding:10px 12px;background:var(--nav);border:1px solid var(--border);border-radius:2px;"></div>
         <div class="sec-hd" style="flex-wrap:wrap;gap:8px;">
@@ -733,6 +733,32 @@ input,select{outline:none;font-family:inherit;}
         </div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:12px;letter-spacing:.3px;">Click <strong>📤 Submit</strong> as you order each item in Oracle. Notes on not-received items are edited on the Current Weekly Order tab.</div>
         <div id="kList"></div>
+      </div>
+
+      <!-- WEEKLY SCHEDULE -->
+      <div class="acard">
+        <h3>🗓️ Weekly Schedule</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6;">Set when the weekly order <strong>resets</strong> and when the <strong>Parts Received Audit</strong> is due. Applies to everyone in this fleet — change these when deploying to a fleet that runs on a different weekly cycle.</div>
+        <div style="display:flex;flex-direction:column;gap:12px;max-width:540px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:12px;color:var(--muted);width:110px;flex-shrink:0;">Weekly reset</label>
+            <select id="schedResetDay" class="fsel" style="min-width:130px;">
+              <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+            </select>
+            <input id="schedResetTime" type="time" class="fsel" style="width:130px;" />
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="font-size:12px;color:var(--muted);width:110px;flex-shrink:0;">Audit due</label>
+            <select id="schedAuditDay" class="fsel" style="min-width:130px;">
+              <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+            </select>
+            <input id="schedAuditTime" type="time" class="fsel" style="width:130px;" />
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-primary" id="schedSaveBtn" onclick="saveSchedule()">Save schedule</button>
+            <span id="schedStatus" style="font-size:11px;color:var(--muted2);"></span>
+          </div>
+        </div>
       </div>
 
       <!-- EXPORT ORDER -->
@@ -1493,6 +1519,15 @@ function snapKey(){ return 'f6_sn_'+(user?user.role:'def'); }
 function favsKey(){ return 'f6_fv_' + (user ? user.role : 'default'); }
 
 // ── FIREBASE CLOUD SYNC ──────────────────────────────────────
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │ NEW FLEET SETUP — change THIS block only.                                 │
+// │ Each fleet runs its own copy with its own Firebase project, so its data   │
+// │ (orders, history, schedule, event log) stays separate. To stand up a new  │
+// │ fleet: create a Firebase project (Realtime Database), then paste that     │
+// │ project's web config below, replacing every value. Nothing else needs to  │
+// │ change — the reset/audit schedule is set in-app at Admin → Weekly         │
+// │ Schedule, so the same code serves any fleet.                              │
+// └─────────────────────────────────────────────────────────────────────────┘
 var firebaseConfig = {
   apiKey: "AIzaSyA6na2bzIxk1QFlmn2mOi-H3QoSI7sgRSM",
   authDomain: "ews-fleet6.firebaseapp.com",
@@ -1618,6 +1653,12 @@ function fbInit(){
     fbDb.ref('auditSnooze').on('value', function(snap){
       var v = snap.val();
       try{ localStorage.setItem(AUDIT_SNOOZE_KEY, String((typeof v==='number'&&v>0)?v:0)); }catch(e){}
+      if(typeof renderAuditBanner==='function') renderAuditBanner();
+    });
+    fbDb.ref('schedule').on('value', function(snap){
+      var v=snap.val();
+      if(v && typeof v==='object'){ schedule=Object.assign({},SCHED_DEFAULT,v); try{ localStorage.setItem(SCHED_KEY, JSON.stringify(schedule)); }catch(e){} }
+      if(typeof renderScheduleSettings==='function') renderScheduleSettings();
       if(typeof renderAuditBanner==='function') renderAuditBanner();
     });
     fbDb.ref('hist').on('value', function(snap){
@@ -1801,6 +1842,7 @@ function load(){
     uomOverrides=JSON.parse(localStorage.getItem('f6_uom_overrides')||'{}');
     partEdits=JSON.parse(localStorage.getItem('f6_part_edits')||'{}');
   }catch(e){order={};orderBy={};keep={};orderStatus={};orderAdded={};orderNotes={};backorderFlag={};lastReset=0;favs={};favGroups={};favSnapshots={};hist=[];deptOverrides={};uomOverrides={};partEdits={};}
+  _loadSchedule();
   // Backfill: any existing order item missing a status/addedAt becomes
   // pending and is dated to the last reset (so it's treated as "from last
   // week" and the admin can clear it explicitly if needed).
@@ -2692,7 +2734,7 @@ function renderHistory(){
     }
   }
   if(!resets.length){
-    document.getElementById('hList').innerHTML='<div class="empty"><div class="ei">📜</div><p>No reset history yet.<br>The full weekly order is snapshotted here every Monday at 8am.</p></div>';
+    document.getElementById('hList').innerHTML='<div class="empty"><div class="ei">📜</div><p>No reset history yet.<br>The full weekly order is snapshotted here every '+schedResetLabel()+'.</p></div>';
     return;
   }
   var _isAdmH = user && user.role==='Administrative';
@@ -2876,7 +2918,7 @@ function renderAuditModal(){
   var addBox=document.getElementById('auditAdminAdd');
   if(isAdmin){
     addBox.style.display='block';
-    addBox.innerHTML='<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Admin: add a late item to this week (submitted after Monday\'s reset)</div>'+
+    addBox.innerHTML='<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Admin: add a late item to this week (submitted after the reset)</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         '<input id="auditAddOracle" placeholder="Oracle #" style="flex:1;min-width:110px;padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--text);font-size:12px;" />'+
         '<input id="auditAddQty" type="number" min="1" value="1" style="width:64px;padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--text);font-size:12px;" />'+
@@ -2997,6 +3039,9 @@ function renderAdmin(){
   // Refresh catalog status so the Export/Restore buttons render correctly
   // and reflect the current backup timestamp every time the admin tab opens.
   if(typeof updateCustomPartsStatus==='function') updateCustomPartsStatus();
+  if(typeof renderScheduleSettings==='function') renderScheduleSettings();
+  var _wr=document.getElementById('warnResetWhen'); if(_wr) _wr.textContent=schedResetLabel();
+  var _wa=document.getElementById('warnAuditWhen'); if(_wa) _wa.textContent=DAYS[schedule.auditDay];
   const items=Object.entries(order).filter(([o,q])=>q>0);
   // Update header counts for pending / submitted / received / backorders
   var pendCount=0, subCount=0, recCount=0, boCount=0;
@@ -3065,7 +3110,7 @@ function _adminRow(oracle, qty, carry){
   var pullLabel=st==='submitted'?'↩ Revert':'📤 Submit';
   var pullTitle=st==='submitted'?'Click to revert to Pending':'Mark Submitted (ordered in Oracle)';
   var actCluster='<div class="act-cluster"><button class="pullb'+(st==='submitted'?' pullb-done':'')+'" onclick="pullPart(\''+oracle+'\')" title="'+pullTitle+'">'+pullLabel+'</button></div>';
-  var moveBtn='<button onclick="moveToLastWeek(\''+oracle+'\')" title="Move into last week\'s order — for a part submitted after Monday\'s reset" style="background:rgba(155,110,212,0.10);color:#9b6ed4;border:1px solid rgba(155,110,212,0.35);border-radius:2px;padding:5px 9px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Last week</button>';
+  var moveBtn='<button onclick="moveToLastWeek(\''+oracle+'\')" title="Move into last week\'s order — for a part submitted after the reset" style="background:rgba(155,110,212,0.10);color:#9b6ed4;border:1px solid rgba(155,110,212,0.35);border-radius:2px;padding:5px 9px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;white-space:nowrap;flex-shrink:0;">↩ Last week</button>';
   return '<div class="krow">'+
     '<div class="kinfo"><div class="kdesc">'+DI[p[4]]+' '+e(p[2].slice(0,90))+(p[2].length>90?'…':'')+'</div>'+
       '<div class="kmeta">'+statusBadgeOf(st)+' Oracle: '+p[0]+' &nbsp;·&nbsp; SAGE: '+p[1]+' &nbsp;·&nbsp; Qty: '+qty+' '+p[3]+'</div></div>'+
@@ -3120,20 +3165,67 @@ function statusSegHtml(oracle){
 
 // Compute the most recent Monday 08:00 in local time that has already passed.
 // Used to decide whether an auto-reset is overdue.
+// ── WEEKLY SCHEDULE (configurable per fleet) ────────────────
+// Admins set the reset day/time and the audit-due day/time; the values sync to
+// the whole fleet via Firebase so the app can be deployed to fleets that run on
+// different weekly cycles.
+var DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+var SCHED_KEY='f6_schedule';
+var SCHED_DEFAULT={resetDay:1,resetHour:8,resetMin:0,auditDay:5,auditHour:15,auditMin:0};
+var schedule=Object.assign({},SCHED_DEFAULT);
+function _loadSchedule(){
+  try{ schedule=Object.assign({},SCHED_DEFAULT,JSON.parse(localStorage.getItem(SCHED_KEY)||'{}')); }
+  catch(e){ schedule=Object.assign({},SCHED_DEFAULT); }
+}
+function _pad2(n){ return (n<10?'0':'')+n; }
+function _fmtTime(h,m){ var ap=h<12?'AM':'PM'; var hh=h%12; if(hh===0)hh=12; return hh+':'+_pad2(m)+' '+ap; }
+function schedResetLabel(){ return DAYS[schedule.resetDay]+' '+_fmtTime(schedule.resetHour,schedule.resetMin); }
+function schedAuditLabel(){ return DAYS[schedule.auditDay]+' '+_fmtTime(schedule.auditHour,schedule.auditMin); }
+
+// Most recent weekly-reset boundary (configurable day + time) that has passed.
 function currentResetCutoff(){
   var now=new Date();
-  // JS getDay(): Sun=0, Mon=1 ... Sat=6
-  var day=now.getDay();
-  var hour=now.getHours();
-  // Days to go BACK to reach the most recent Monday.
-  // If it's Monday and the clock is past 8am, the cutoff is today 8am.
-  // If it's Monday before 8am, the cutoff is last Monday 8am (7 days ago).
-  var back;
-  if(day===1){ back = (hour>=8) ? 0 : 7; }
-  else if(day===0){ back = 6; } // Sunday -> previous Monday
-  else { back = day - 1; }       // Tue=1, Wed=2, ...
-  var cutoff=new Date(now.getFullYear(),now.getMonth(),now.getDate()-back,8,0,0,0);
+  var rd=(typeof schedule.resetDay==='number')?schedule.resetDay:1;
+  var rh=(typeof schedule.resetHour==='number')?schedule.resetHour:8;
+  var rm=(typeof schedule.resetMin==='number')?schedule.resetMin:0;
+  var dow=now.getDay();
+  var back=(dow - rd + 7) % 7;          // days back to the most recent reset weekday
+  if(back===0){                         // it's reset day — if before the time, the boundary was last week
+    var todayReset=new Date(now.getFullYear(),now.getMonth(),now.getDate(),rh,rm,0,0);
+    if(now.getTime() < todayReset.getTime()) back=7;
+  }
+  var cutoff=new Date(now.getFullYear(),now.getMonth(),now.getDate()-back,rh,rm,0,0);
   return cutoff.getTime();
+}
+// Populate the admin Weekly Schedule controls from the current config.
+function renderScheduleSettings(){
+  var rd=document.getElementById('schedResetDay'); if(!rd) return;
+  rd.value=String(schedule.resetDay);
+  document.getElementById('schedResetTime').value=_pad2(schedule.resetHour)+':'+_pad2(schedule.resetMin);
+  document.getElementById('schedAuditDay').value=String(schedule.auditDay);
+  document.getElementById('schedAuditTime').value=_pad2(schedule.auditHour)+':'+_pad2(schedule.auditMin);
+  var isAdmin=user&&user.role==='Administrative';
+  ['schedResetDay','schedResetTime','schedAuditDay','schedAuditTime'].forEach(function(id){var el=document.getElementById(id); if(el) el.disabled=!isAdmin;});
+  var sb=document.getElementById('schedSaveBtn'); if(sb) sb.style.display=isAdmin?'':'none';
+  var st=document.getElementById('schedStatus'); if(st) st.textContent='Resets '+schedResetLabel()+' · audit due '+schedAuditLabel();
+}
+function saveSchedule(){
+  if(!user||user.role!=='Administrative'){ toast('Admin only'); return; }
+  var rt=(document.getElementById('schedResetTime').value||'08:00').split(':');
+  var at=(document.getElementById('schedAuditTime').value||'15:00').split(':');
+  schedule={
+    resetDay: parseInt(document.getElementById('schedResetDay').value,10)||0,
+    resetHour: parseInt(rt[0],10)||0,  resetMin: parseInt(rt[1],10)||0,
+    auditDay: parseInt(document.getElementById('schedAuditDay').value,10)||0,
+    auditHour: parseInt(at[0],10)||0,  auditMin: parseInt(at[1],10)||0
+  };
+  try{ localStorage.setItem(SCHED_KEY, JSON.stringify(schedule)); }catch(e){}
+  if(typeof fbReady!=='undefined' && fbReady){ try{ fbDb.ref('schedule').set(schedule); }catch(e){} }
+  if(typeof writeLog==='function') writeLog('SCHEDULE','','Weekly schedule updated','reset '+schedResetLabel()+' · audit '+schedAuditLabel(),user.name,user.role);
+  renderScheduleSettings();
+  if(typeof renderAdmin==='function') renderAdmin();
+  if(typeof renderAuditBanner==='function') renderAuditBanner();
+  toast('Weekly schedule saved');
 }
 
 // Auto-reset hook. Called on app load (after data is loaded). If we haven't
@@ -3171,7 +3263,7 @@ function maybeAutoReset(){
     // carries its dept + an auditStatus the Friday audit fills in.
     hist.push({
       date:new Date(cutoff).toLocaleString()+' (weekly-reset)',
-      submittedBy:'Auto (Monday 8am)',
+      submittedBy:'Auto ('+schedResetLabel()+')',
       role:'System',
       items:freshItems,
       weekEnded:cutoff,
@@ -3191,7 +3283,7 @@ function maybeAutoReset(){
   if(typeof badges==='function') badges();
   if(typeof renderAuditBanner==='function') renderAuditBanner();
   if(freshItems.length){
-    toast('Weekly reset: '+freshItems.length+' item'+(freshItems.length===1?'':'s')+' moved to History — run the Parts Received Audit on Friday');
+    toast('Weekly reset: '+freshItems.length+' item'+(freshItems.length===1?'':'s')+' moved to History — run the Parts Received Audit '+DAYS[schedule.auditDay]);
   }
   return true;
 }
@@ -3290,7 +3382,7 @@ function moveToLastWeek(oracle){
     if(h && h.date && (String(h.date).indexOf('weekly-reset')>=0 || String(h.date).indexOf('pre-reset')>=0)){ idx=i; break; }
   }
   if(idx<0){
-    alert('There is no previous week to move this into yet.\n\nA week appears in History after the first Monday 8 AM reset.');
+    alert('There is no previous week to move this into yet.\n\nA week appears in History after the first weekly reset.');
     return;
   }
   var target=hist[idx];
@@ -3355,13 +3447,13 @@ function _bannerExpired(){
 const BANNER_MSGS = {
   admin: [
     `<span class="upd-em">🆕 CURRENT WEEKLY ORDER</span> — "My Order" is now <strong>Current Weekly Order</strong>, split into <strong>Items requested this week</strong> and <strong>Items not received from previous week</strong>, grouped by department.`,
-    `<span class="upd-em">📋 PARTS RECEIVED AUDIT</span> — every week in History now has an audit. When the order arrives Friday, anyone checks off what came in. Misses surface as "not received" so they aren't ordered again.`,
+    `<span class="upd-em">📋 PARTS RECEIVED AUDIT</span> — every week in History now has an audit. When the order arrives, anyone checks off how many of each part came in. Misses surface as "not received" so they aren't ordered again.`,
     `<span class="upd-em">📦 "BACKORDER" IS GONE</span> — items now simply show as <strong>not received from previous week</strong>, set by the audit (not automatically at reset).`,
-    `<span class="upd-em">🔔 AUDIT REMINDER</span> — a banner nags Thursday + Friday until the audit is done. Admins can snooze it for special circumstances.`,
+    `<span class="upd-em">🔔 AUDIT REMINDER</span> — a banner nags in the days before the audit is due until it's done. Admins can snooze or ignore it for special circumstances, and set the schedule under Admin → Weekly Schedule.`,
   ],
   user: [
     `<span class="upd-em">🆕 CURRENT WEEKLY ORDER</span> — your order tab is renamed and split into <strong>requested this week</strong> and <strong>not received from previous week</strong>, by department.`,
-    `<span class="upd-em">📋 PARTS RECEIVED AUDIT</span> — when parts arrive Friday, <strong>anyone</strong> can open History and check off what was received. Please help keep it current!`,
+    `<span class="upd-em">📋 PARTS RECEIVED AUDIT</span> — when parts arrive, <strong>anyone</strong> can open History and check off how many were received. Please help keep it current!`,
     `<span class="upd-em">⚠️ NO DOUBLE-ORDERS</span> — if you request a part that's still awaiting fulfillment from a previous week, the app warns you.`,
   ],
 };
@@ -3413,11 +3505,19 @@ function _auditSnoozeUntil(){
   var v=0; try{ v=parseInt(localStorage.getItem(AUDIT_SNOOZE_KEY)||'0',10)||0; }catch(e){}
   return v;
 }
-function _auditDueTime(weekEndedMs){            // Friday 3:00 PM of that week
-  var d=new Date(weekEndedMs); d.setDate(d.getDate()+4); d.setHours(15,0,0,0); return d.getTime();
+function _auditDueTime(weekEndedMs){            // configured audit day/time, after the reset
+  var ad=(typeof schedule.auditDay==='number')?schedule.auditDay:5;
+  var ah=(typeof schedule.auditHour==='number')?schedule.auditHour:15;
+  var am=(typeof schedule.auditMin==='number')?schedule.auditMin:0;
+  var base=new Date(weekEndedMs);
+  var fwd=(ad - base.getDay() + 7) % 7;        // days forward to the audit weekday
+  var due=new Date(base.getFullYear(),base.getMonth(),base.getDate()+fwd,ah,am,0,0);
+  if(due.getTime() <= weekEndedMs) due=new Date(due.getTime()+7*86400000);  // keep due after the reset
+  return due.getTime();
 }
-function _auditRemindStart(weekEndedMs){        // Thursday 00:00 of that week
-  var d=new Date(weekEndedMs); d.setDate(d.getDate()+3); d.setHours(0,0,0,0); return d.getTime();
+function _auditRemindStart(weekEndedMs){        // reminder opens the day before the audit, at midnight
+  var due=new Date(_auditDueTime(weekEndedMs));
+  return new Date(due.getFullYear(),due.getMonth(),due.getDate()-1,0,0,0,0).getTime();
 }
 function _snapAudited(h){
   if(h && h.auditIgnored) return true;   // admin chose to skip this week's audit
@@ -3647,6 +3747,7 @@ function refreshEventLog() {
     'PULL':    { color:'#1eb474', label:'📤 Pulled' },
     'MOVE':    { color:'#9b6ed4', label:'↩ Moved to last week' },
     'EDIT':    { color:'#2f8cca', label:'✏️ Edited part' },
+    'SCHEDULE':{ color:'#c9842a', label:'🗓️ Schedule change' },
     'AUDIT':   { color:'#56b8a3', label:'📋 Received audit' },
     'IGNORE':  { color:'#9b6ed4', label:'🚫 Audit ignored' },
     'SNOOZE':  { color:'#c9842a', label:'😴 Audit snoozed' },
@@ -3732,7 +3833,7 @@ var HELP_CONTENT = {
         items: [
           "The <strong>shared weekly order</strong> for Fleet 6 — everyone on every dept profile sees and edits the same list. Changes sync in real time.",
           "It has two parts: <strong>Items requested this week</strong> (new requests) and <strong>Items not received from previous week</strong> (ordered earlier but not yet confirmed received). Both are grouped by the 4 departments.",
-          "Every <strong>Monday at 8:00 AM</strong> the week's order moves to <strong>History</strong>. Nothing is marked 'not received' automatically — that only happens when a <strong>Parts Received Audit</strong> turns up a miss.",
+          "Every <strong>{RESET}</strong> the week's order moves to <strong>History</strong>. Nothing is marked 'not received' automatically — that only happens when a <strong>Parts Received Audit</strong> turns up a miss.",
         ]
       },
       { heading: "Status badges on each item",
@@ -3826,13 +3927,13 @@ var HELP_CONTENT = {
     sections: [
       { heading: "What you're looking at",
         items: [
-          "Each entry is the <strong>full weekly order snapshot</strong>, stamped with the Monday 8:00 AM cutoff. Most recent at the top. Items keep the Pending/Submitted status they had at reset.",
+          "Each entry is the <strong>full weekly order snapshot</strong>, stamped with the {RESET} cutoff. Most recent at the top. Items keep the Pending/Submitted status they had at reset.",
           "This is where you confirm what actually arrived. Most users can <em>view</em> history; <strong>anyone</strong> can run a Parts Received Audit; only admins can edit a recorded status or add a late item.",
         ]
       },
       { heading: "Running a Parts Received Audit",
         items: [
-          "When the order arrives (Fridays), click <strong>📋 Parts Received Audit</strong> on that week. Check off every part that physically came in, then <strong>Save audit</strong>.",
+          "When the order arrives (around {AUDITDAY}), click <strong>📋 Parts Received Audit</strong> on that week. Enter how many of each part arrived, then <strong>Save audit</strong>.",
           "Received items are closed out. Anything left unchecked is promoted to <strong>Items not received from previous week</strong> on the Current Weekly Order tab — so it isn't ordered again.",
           "The audit is recorded on that week with <strong>your name, the time, and the result</strong> (e.g. \"38 received, 2 not\"). Parts arriving in waves? Re-run it any time to check off more.",
         ]
@@ -3851,16 +3952,16 @@ var HELP_CONTENT = {
     sections: [
       { heading: "Weekly cycle (automatic)",
         items: [
-          "Every <strong>Monday at 8:00 AM local time</strong>, the app moves the <strong>whole week's order</strong> (every status) into History for that week's Parts Received Audit. The Current Weekly Order tab clears for the new week.",
-          "The reset is fully automatic — there is no manual reset button. Submit items in Oracle before Monday 8 AM.",
-          "If no one opens the app right at 8 AM, the close-out fires the next time someone loads it, still stamped with the 8:00 AM cutoff.",
+          "Every <strong>{RESET}</strong> (local time), the app moves the <strong>whole week's order</strong> (every status) into History for that week's Parts Received Audit. The Current Weekly Order tab clears for the new week.",
+          "The reset is fully automatic — there is no manual reset button. Submit items in Oracle before {RESET}.",
+          "If no one opens the app right at reset time, the close-out fires the next time someone loads it, still stamped with the {RESETTIME} cutoff.",
         ]
       },
       { heading: "Ordering items (current week)",
         items: [
           "Each requested item has a <strong>📤 Submit</strong> button. Click it as you place the order in Oracle — the badge changes to ✓ Submitted so the crews know it's handled.",
-          "Click again (now <strong>↩ Revert</strong>) to undo back to Pending. Receiving is confirmed later, in the Friday Parts Received Audit — not here.",
-          "Use <strong>↩ Last week</strong> to move an item that was submitted after Monday's reset back into the previous week's order (e.g. someone submitted late).",
+          "Click again (now <strong>↩ Revert</strong>) to undo back to Pending. Receiving is confirmed later, in the {AUDITDAY} Parts Received Audit — not here.",
+          "Use <strong>↩ Last week</strong> to move an item that was submitted after the reset back into the previous week's order (e.g. someone submitted late).",
         ]
       },
       { heading: "Items not received from previous week",
@@ -3915,8 +4016,18 @@ function openHelp(tab){
     html += '</ul>';
   });
   html += '</div>';
-  document.getElementById('helpBody').innerHTML = html;
+  document.getElementById('helpBody').innerHTML = _applySchedTokens(html);
   modal.style.display = 'flex';
+}
+// Substitute the live schedule into help/UI text so each fleet's copy reads
+// correctly for its own configured reset/audit days and times.
+function _applySchedTokens(s){
+  if(!s) return s;
+  return String(s).replace(/\{RESET\}/g, schedResetLabel())
+          .replace(/\{RESETDAY\}/g, DAYS[schedule.resetDay])
+          .replace(/\{RESETTIME\}/g, _fmtTime(schedule.resetHour,schedule.resetMin))
+          .replace(/\{AUDITDAY\}/g, DAYS[schedule.auditDay])
+          .replace(/\{AUDIT\}/g, schedAuditLabel());
 }
 function closeHelp(){
   document.getElementById('mHelp').style.display = 'none';
