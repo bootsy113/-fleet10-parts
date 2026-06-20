@@ -865,6 +865,27 @@ input,select{outline:none;font-family:inherit;}
   </div>
 </div>
 
+<!-- MARK RECEIVED MODAL — confirm full or partial quantity received -->
+<div class="mov" id="mReceive">
+  <div class="modal" style="max-width:460px;border-top-color:#2d8a4e;">
+    <h3>✓ Mark Received</h3>
+    <div id="rcvDesc" style="font-size:13px;color:var(--text);font-weight:600;line-height:1.35;margin-bottom:5px;"></div>
+    <div id="rcvMeta" style="font-size:11px;color:var(--muted);margin-bottom:16px;"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <label style="font-size:12px;color:var(--muted);">Quantity received:</label>
+      <button class="qb" onclick="rcvAdj(-1)">−</button>
+      <input id="rcvQty" type="number" min="1" value="1" oninput="rcvSync()" style="width:84px;padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--text);font-size:15px;text-align:center;" />
+      <button class="qb" onclick="rcvAdj(1)">+</button>
+      <span id="rcvOf" style="font-size:12px;color:var(--muted2);"></span>
+    </div>
+    <div id="rcvHint" style="font-size:11px;color:var(--muted2);line-height:1.5;margin-bottom:16px;"></div>
+    <div class="mbtns">
+      <button class="btn-ghost" onclick="closeMod()">Cancel</button>
+      <button class="btn-primary" onclick="confirmReceive()" style="background:#2d6a2d;border:none;">✓ Confirm received</button>
+    </div>
+  </div>
+</div>
+
 <!-- EDIT PART MODAL — admin edits an individual catalog part -->
 <div class="mov" id="mEditPart">
   <div class="modal" style="max-width:560px;border-top-color:#2f8cca;">
@@ -2037,32 +2058,68 @@ function rmP(oracle){
 // Mark a carried-over "not received from previous week" item as received.
 // Any user, with a confirmation. Removes it from the order and reflects the
 // received status on the matching History snapshot item so History agrees.
+var _rcvOracle=null, _rcvRemaining=0;
+// Open the receive dialog for a "not received" carryover item — the user
+// confirms how many of the expected qty actually arrived (full or partial).
 function markCarryReceived(oracle){
   if(!user){ toast('Please sign in'); return; }
+  var remaining=order[oracle]||0; if(remaining<=0) return;
   var p=gp(oracle);
-  if(!confirm('Mark this part as RECEIVED?\n\n'+(p?p[2].slice(0,90):('Oracle #'+oracle))+'\n\nIt will be removed from "not received from previous week" and recorded as received in History.')) return;
+  _rcvOracle=oracle; _rcvRemaining=remaining;
+  document.getElementById('rcvDesc').textContent = p?p[2]:('Oracle #'+oracle);
+  document.getElementById('rcvMeta').innerHTML = 'Oracle: '+(p?p[0]:oracle)+' &nbsp;·&nbsp; Expected: <strong>'+remaining+'</strong>'+(p?(' '+p[3]):'');
+  var qi=document.getElementById('rcvQty'); qi.value=remaining; qi.setAttribute('max', remaining);
+  document.getElementById('rcvOf').textContent='of '+remaining+(p?(' '+p[3]):'');
+  rcvSync();
+  document.getElementById('mReceive').classList.add('show');
+}
+function rcvAdj(d){ var qi=document.getElementById('rcvQty'); qi.value=(parseInt(qi.value,10)||0)+d; rcvSync(); }
+function rcvSync(){
+  var qi=document.getElementById('rcvQty'); var v=parseInt(qi.value,10)||0;
+  if(v<1) v=1; if(v>_rcvRemaining) v=_rcvRemaining; qi.value=v;
+  var rem=_rcvRemaining-v;
+  document.getElementById('rcvHint').innerHTML = (rem<=0)
+    ? '✓ Receiving the full remaining quantity — this item closes out.'
+    : '↩ <strong>'+rem+'</strong> stays in “not received from previous week”; <strong>'+v+'</strong> is recorded received in History.';
+}
+function confirmReceive(){
+  if(!user || !_rcvOracle){ return; }
+  var oracle=_rcvOracle;
+  var remaining=order[oracle]||0;
+  var rq=parseInt(document.getElementById('rcvQty').value,10)||0;
+  if(rq<1){ toast('Enter a quantity of 1 or more'); return; }
+  if(rq>remaining) rq=remaining;
+  var p=gp(oracle);
+  // Record the received portion on the matching History snapshot item.
   for(var i=hist.length-1;i>=0;i--){
     var h=hist[i];
-    if(!h || String(h.date||'').indexOf('weekly-reset')<0) continue;
-    var items=h.items||[], hitOne=false;
+    if(!h || (String(h.date||'').indexOf('weekly-reset')<0 && String(h.date||'').indexOf('pre-reset')<0)) continue;
+    var items=h.items||[], done=false;
     for(var j=0;j<items.length;j++){
-      if(items[j].oracle===oracle && (items[j].auditStatus||'')!=='received'){
-        items[j].auditStatus='received'; items[j].status='received';
-        items[j].receivedBy=user.name; items[j].receivedAt=Date.now();
-        hitOne=true;
+      var it=items[j];
+      if(it.oracle===oracle && (it.auditStatus||'')!=='received'){
+        var oq=it.qty||remaining;
+        it.receivedQty=(it.receivedQty||0)+rq;
+        it.receivedBy=user.name; it.receivedAt=Date.now();
+        if(it.receivedQty>=oq){ it.auditStatus='received'; it.status='received'; }
+        else { it.auditStatus='not_received'; }   // still partially outstanding (decided state)
+        done=true; break;
       }
     }
-    if(hitOne) break;
+    if(done) break;
   }
-  _forgetItem(oracle); delete backorderFlag[oracle];
+  var newRemain=remaining-rq;
+  if(newRemain<=0){ _forgetItem(oracle); delete backorderFlag[oracle]; }
+  else { order[oracle]=newRemain; }
   save();
-  if(user) writeLog('RECEIVE', oracle, p?p[2]:'Oracle #'+oracle, 'received from previous week', user.name, user.role);
+  if(user) writeLog('RECEIVE', oracle, p?p[2]:'Oracle #'+oracle, rq+' of '+remaining+(newRemain>0?(' · '+newRemain+' still expected'):' · full'), user.name, user.role);
+  closeMod(); _rcvOracle=null;
   renderOrder();
   if(typeof renderHistory==='function') renderHistory();
   if(typeof renderAdmin==='function') renderAdmin();
   badges();
   if(typeof renderAuditBanner==='function') renderAuditBanner();
-  toast('Marked received');
+  toast(newRemain<=0 ? 'Received in full' : (rq+' received · '+newRemain+' still expected'));
 }
 // Capture / refresh snapshots for every favorite whose Oracle # is in the
 // active parts list. Two jobs:
@@ -2657,7 +2714,9 @@ function renderHistory(){
       else if(itStatus==='received')  sBadge='<span class="stbadge stbadge-rec">📦 Received</span>';
       else                            sBadge='<span class="stbadge stbadge-pend">● Pending</span>';
       var a=it.auditStatus||'';
+      var _rq=it.receivedQty||0, _oq=it.qty||0;
       var aBadge = a==='received' ? '<span class="stbadge stbadge-rec">✅ Received</span>'
+                 : (_rq>0 && _rq<_oq) ? '<span class="stbadge stbadge-bo">📦 '+_rq+' of '+_oq+' received</span>'
                  : a==='not_received' ? '<span class="stbadge stbadge-bo">📦 Not received</span>'
                  : '<span class="stbadge stbadge-pend">⏳ Awaiting audit</span>';
       var desc = p ? e(p[2]) : ('Oracle #'+it.oracle+' (not in current catalog)');
