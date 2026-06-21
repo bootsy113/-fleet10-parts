@@ -622,7 +622,12 @@ input,select{outline:none;font-family:inherit;}
         <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#888;display:inline-block;transition:background .3s;"></span>
         <span id="syncLbl" style="font-size:10px;color:#888;letter-spacing:.5px;font-weight:600;">Offline</span>
       </div>
-      <button class="exit-btn" onclick="openWalkthrough()" title="Watch the walkthrough video for your role" style="background:rgba(47,140,202,0.15);border-color:rgba(47,140,202,0.45);color:#7fb8e6;margin-right:6px;">📺 Guide</button>
+      <style>
+        @keyframes guideGlow{0%,100%{box-shadow:0 0 5px 1px rgba(47,140,202,.55);}50%{box-shadow:0 0 17px 4px rgba(47,140,202,.95);}}
+        .guide-btn{display:inline-flex;align-items:center;gap:6px;background:#2f8cca;color:#fff;border:1px solid #6bb4e6;border-radius:5px;padding:6px 14px;font-size:12px;font-weight:800;letter-spacing:.3px;cursor:pointer;white-space:nowrap;margin-right:8px;animation:guideGlow 1.8s ease-in-out infinite;transition:transform .15s ease,background .15s ease;}
+        .guide-btn:hover{background:#3a9bdb;transform:translateY(-1px);}
+      </style>
+      <button class="guide-btn" onclick="openWalkthrough()" title="Watch the walkthrough video for your role">📺 Watch the Walkthrough</button>
       <button class="exit-btn" onclick="logout()">Exit</button>
     </div>
   </div>
