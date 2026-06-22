@@ -3616,7 +3616,7 @@ function openWalkthrough(which){
   var isAdmin = user && user.role==='Administrative';
   if(!which) which = isAdmin ? 'admin' : 'user';
   if(which==='admin' && !isAdmin) which='user';   // non-admins only get the user guide
-  var file = which==='admin' ? 'Fleet6_Admin_Walkthrough.mp4' : 'Fleet6_User_Walkthrough.mp4';
+  var file = which==='admin' ? 'https://github.com/HELLFIREninja/-fleet6-parts/releases/download/v1.0/Fleet6_Admin_Walkthrough.mp4' : 'https://github.com/HELLFIREninja/-fleet6-parts/releases/download/v1.0/Fleet6_User_Walkthrough.mp4';
   var v=document.getElementById('wtVideo');
   document.getElementById('wtTitle').textContent = (which==='admin'?'📺 Admin Walkthrough':'📺 User Walkthrough');
   var miss=document.getElementById('wtMissing'); miss.style.display='none';
